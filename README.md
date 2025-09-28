@@ -3,6 +3,8 @@ Online tool for converting X-ray diffraction data files between formats (.xrdml,
 
 Access the app here: https://xrd-convert.streamlit.app/
 
+![XRD file format conversion](file_convert.png)
+
 # **How to compile and run the XRDlicious locally:** 
 
 ### **Prerequisities**: 
