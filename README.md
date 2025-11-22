@@ -10,7 +10,7 @@ Online tool for converting X-ray diffraction data files between formats (.xrdml,
 
 ![XRD file format conversion](file_convert.png)
 
-# **How to compile and run the XRDlicious locally:** 
+# **How to compile and run it locally (if needed):** 
 
 ### **Prerequisities**: 
 - Python 3.x (Tested 3.12)
