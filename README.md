@@ -44,11 +44,11 @@ Open your terminal console and write the following commands (the bold text):
       **streamlit run app.py**
 
 
-### **Example** 
-Conversion between different wavelenghts
+# **Example** 
+Conversion between different wavelenghts.
 
 ![XRD data conversion](images/xrays_convert.png)  
 --
 
-Conversion from automatic to fix slits
+Conversion from automatic to fix slits.
 ![XRD data conversion](images/xrays_convert_2.png)
