@@ -9,6 +9,8 @@ import re
 import zipfile
 import struct
 
+from xrd_conversion import run_axis_converter, convert_xaxis_data, get_axis_label
+
 
 def run_data_converter():
     def extract_key_ras_metadata(metadata_dict):
@@ -1645,16 +1647,67 @@ def display_conversion_visual():
     """, unsafe_allow_html=True)
 
 
-
-
-
 if __name__ == "__main__":
     st.set_page_config(layout="wide", page_title="XRD File Converter")
-    st.sidebar.title("XRD File Converter")
+
+    css = '''
+    <style>
+    .stTabs [data-baseweb="tab-list"] button [data-testid="stMarkdownContainer"] p {
+        font-size: 1.15rem !important;
+        color: #1e3a8a !important;
+        font-weight: 600 !important;
+        margin: 0 !important;
+    }
+
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 20px !important;
+    }
+
+    .stTabs [data-baseweb="tab-list"] button {
+        background-color: #f0f4ff !important;
+        border-radius: 12px !important;
+        padding: 8px 16px !important;
+        transition: all 0.3s ease !important;
+        border: none !important;
+        color: #1e3a8a !important;
+    }
+
+    .stTabs [data-baseweb="tab-list"] button:hover {
+        background-color: #dbe5ff !important;
+        cursor: pointer;
+    }
+
+    .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] {
+        background-color: #e0e7ff !important;
+        color: #1e3a8a !important;
+        font-weight: 700 !important;
+        box-shadow: 0 2px 6px rgba(30, 58, 138, 0.3) !important;
+    }
+
+    .stTabs [data-baseweb="tab-list"] button:focus {
+        outline: none !important;
+    }
+    </style>
+    '''
+
+    st.markdown(css, unsafe_allow_html=True)
+
+    st.sidebar.title("XRD Converter Tools")
     st.sidebar.info(
-    "Visit also main app here: **[XRDlicious](xrdlicious.com)**.🌀 Developed by **[IMPLANT team](https://implant.fs.cvut.cz/)**. **[Tutorial here](https://youtu.be/KwxVKadPZ6s?si=S1_67xF5J3sI7n69)**. Spot a bug or have a feature idea? Let us know at: "
-    "**lebedmi2@cvut.cz**. To compile the app locally, visit our **[GitHub page](https://github.com/bracerino/xrd-file-converter)**. If you like the app, please cite **[article in IUCr](https://journals.iucr.org/j/issues/2025/05/00/hat5006/index.html).** "
+        "Visit also main app here: **[XRDlicious](xrdlicious.com)**. 🌀 Developed by **[IMPLANT team](https://implant.fs.cvut.cz/)**. "
+        "**[Tutorial here](https://youtu.be/KwxVKadPZ6s?si=S1_67xF5J3sI7n69)**. Spot a bug or have a feature idea? Let us know at: "
+        "**lebedmi2@cvut.cz**. To compile the app locally, visit our **[GitHub page](https://github.com/bracerino/xrd-file-converter)**. "
+        "If you like the app, please cite **[article in IUCr](https://journals.iucr.org/j/issues/2025/05/00/hat5006/index.html).**"
+    )
+    st.sidebar.title("Select between format and X/Y-Axis Conversion")
+    tool_choice = st.sidebar.radio(
+        f"**Select Tool:**",
+        ["📄 File Format Converter", "🔄 X-Axis Converter"],
+        index=0
     )
 
-    run_data_converter()
-    display_conversion_visual()
+    if tool_choice == "📄 File Format Converter":
+        run_data_converter()
+        display_conversion_visual()
+    else:
+        run_axis_converter()
