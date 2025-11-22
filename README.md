@@ -36,14 +36,19 @@ Open your terminal console and write the following commands (the bold text):
 
 4) Activate the Python virtual environment (before activating, make sure you are inside the xrdlicious folder):  
       **source xrd_env/bin/activate**
-
-![XRD data conversion](images/xrays_convert.png)  
---
-![XRD data conversion](images/xrays_convert_2.png)
-
    
 6) Install all the necessary Python packages:  
       **pip install -r requirements.txt**
 
 7) Run the app (always before running it, make sure to activate its Python virtual environment (Step 4):  
       **streamlit run app.py**
+
+
+### **Example** 
+Conversion between different wavelenghts
+
+![XRD data conversion](images/xrays_convert.png)  
+--
+
+Conversion from automatic to fix slits
+![XRD data conversion](images/xrays_convert_2.png)
