@@ -1407,7 +1407,6 @@ def run_data_converter():
     with st.expander(f"How to **Cite**", icon="📚", expanded=False):
         st.markdown("""
         If you like the app, please cite the following source:
-        ---
         - **XRDlicious, 2025** – [Lebeda, Miroslav, et al. XRDlicious: an interactive web-based platform for online calculation of diffraction patterns and radial distribution functions from crystal structures. Applied Crystallography, 2025, 58.5.](https://doi.org/10.1107/S1600576725005370).
         """)
     #st.markdown(
