@@ -231,7 +231,12 @@ def get_y_axis_label(normalize, y_scale):
 
 
 def run_axis_converter():
-    st.markdown("### 🔄 XRD Data X-Axis Converter")
+    st.markdown("### 🔄 XRD Data X/Y-Axis Converter")
+    with st.expander(f"How to **Cite**", icon="📚", expanded=False):
+        st.markdown("""
+        If you like the app, please cite the following source:
+        - **XRDlicious, 2025** – [Lebeda, Miroslav, et al. XRDlicious: an interactive web-based platform for online calculation of diffraction patterns and radial distribution functions from crystal structures. Applied Crystallography, 2025, 58.5.](https://doi.org/10.1107/S1600576725005370).
+        """)
     st.info(
         "📊 Convert your XRD data between different x-axis formats: "
         "**2θ** (different wavelengths) ↔️ **d-spacing** ↔️ **q-vector**. "
@@ -239,8 +244,8 @@ def run_axis_converter():
     )
 
     uploaded_files_raw = st.file_uploader(
-        "Upload XRD Data File(s) (.xy, .txt, .dat)",
-        type=["xy", "txt", "dat"],
+        "Upload XRD Data File(s) (.xy, .txt, .dat, .csv)",
+        type=["xy", "txt", "dat", "csv", "data"],
         accept_multiple_files=True
     )
 
