@@ -1429,7 +1429,7 @@ def run_data_converter():
 
 
     uploaded_files_raw = st.file_uploader("Upload Data File(s)",
-                                          type=["xrdml", "xml", "ras", "xy", "dat", "txt", "raw"],
+                                          type=["xrdml", "xml", "ras", "xy", "dat", "txt", "raw", "csv"],
                                           accept_multiple_files=allow_batch)
 
     if uploaded_files_raw:
