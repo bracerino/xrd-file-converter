@@ -1707,7 +1707,7 @@ if __name__ == "__main__":
     st.sidebar.title("Select between format and X/Y-Axis Conversion")
     tool_choice = st.sidebar.radio(
         f"**Select Tool:**",
-        ["📄 File Format Converter", "🔄 X-Axis Converter"],
+        ["📄 File Format Converter", "🔄 X/Y-Axis Converter"],
         index=0
     )
 
