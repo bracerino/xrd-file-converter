@@ -1654,7 +1654,16 @@ def display_conversion_visual():
 
 if __name__ == "__main__":
     st.set_page_config(layout="wide", page_title="XRD File Converter")
-
+    
+    hide_streamlit_style = """
+    <style>
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+    </style>
+    """
+    
+    st.markdown(hide_streamlit_style, unsafe_allow_html=True)
     css = '''
     <style>
     .stTabs [data-baseweb="tab-list"] button [data-testid="stMarkdownContainer"] p {
