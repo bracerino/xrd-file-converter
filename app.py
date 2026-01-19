@@ -1420,17 +1420,11 @@ def run_data_converter():
     st.info(
         "📄🔁📄 Upload one or more data powder diffraction files to convert them to a different format. .**xy ➡️ .xrdml, .ras, .raw**. "
         "Or **.xrdml, .ras, .raw ➡️ .xy**. \n\n ⚠️ Older **.raw** format can currently produce incorrect x-axis values. "
-        "Check if they are correct in the converted .xy format.")
-
-    allow_batch = st.checkbox(
-        f"Allow multiple file uploads (**batch mode**). All files must have the same extension. The first file will be previewed in the plot. The set settings "
-        f"will propagated to all converted files." ,
-    )
-
+        "Check if they are correct in the converted .xy format. \n\n **Batch mode** is automatically activated when multiple files are uploaded.")
 
     uploaded_files_raw = st.file_uploader("Upload Data File(s)",
                                           type=["xrdml", "xml", "ras", "xy", "dat", "txt", "raw", "csv"],
-                                          accept_multiple_files=allow_batch)
+                                          accept_multiple_files=True)
 
     if uploaded_files_raw:
         if isinstance(uploaded_files_raw, list):
@@ -1442,6 +1436,12 @@ def run_data_converter():
         if not all(f.name.lower().split('.')[-1] == first_file_ext for f in uploaded_files):
             st.error("Error: Please upload files of the same format.")
             return
+        
+        if len(uploaded_files) > 1:
+            st.success(
+                f"✅ Successfully uploaded **{len(uploaded_files)}** files (**.{first_file_ext}** format) - Batch mode activated")
+        else:
+            st.success(f"✅ Successfully uploaded **1** file (**.{first_file_ext}** format)")
 
         first_file = uploaded_files[0]
         file_ext = first_file_ext
