@@ -708,8 +708,8 @@ def run_axis_converter():
                   (f" (showing 1 of {len(uploaded_files)} files)" if is_batch else ""),
             xaxis_title=x_axis_title,
             yaxis_title=y_axis_title,
-            xaxis=dict(title_font=dict(size=18), tickfont=dict(size=14)),
-            yaxis=dict(title_font=dict(size=18), tickfont=dict(size=14)),
+            xaxis=dict(title_font=dict(size=22, color="black"), tickfont=dict(size=20, color="black")),
+            yaxis=dict(title_font=dict(size=22, color="black"), tickfont=dict(size=20, color="black")),
             height=600,
             hovermode='x unified',
             font=dict(size=20, color="black"),
@@ -719,7 +719,8 @@ def run_axis_converter():
                 yanchor="bottom",
                 y=1.02,
                 xanchor="right",
-                x=1
+                x=1,
+                font = dict(size=18, color="black"),
             )
         )
 
