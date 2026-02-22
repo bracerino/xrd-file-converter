@@ -395,8 +395,8 @@ def _bg_settings_ui() -> tuple[str, dict]:
                  "Increase if peaks are over-suppressed near bent regions.")
         params["sv_fraction"] = st.select_slider(
             "Sampling fraction",
-            options=[0.02, 0.03, 0.05, 0.07, 0.10, 0.15, 0.20],
-            value=0.05,
+            options=[0.01, 0.02, 0.03, 0.05, 0.07, 0.10, 0.15, 0.20],
+            value=0.02,
             format_func=lambda v: f"{v*100:.0f}%",
             key="chi_sv_fraction",
             help="Fraction of points used as initial background estimate "
