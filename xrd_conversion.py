@@ -710,8 +710,8 @@ def run_axis_converter():
             yaxis_title=y_axis_title,
             height=600,
             hovermode='x unified',
-            font=dict(size=18),   
-            title_font=dict(size=20),
+            font=dict(size=18, color="black"),
+            title_font=dict(size=20, color="black")
             legend=dict(
                 orientation="h",
                 yanchor="bottom",
