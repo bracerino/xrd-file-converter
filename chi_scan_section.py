@@ -353,7 +353,7 @@ def _bg_settings_ui() -> tuple[str, dict]:
         "Background method",
         ["None", "Polynomial Fit", "SNIP Algorithm",
          "Rolling Ball", "airPLS", "Sonneveld-Visser"],
-        index=5,
+        index=4,
         key="chi_bg_method",
     )
 
@@ -374,8 +374,8 @@ def _bg_settings_ui() -> tuple[str, dict]:
     elif method == "airPLS":
         params["airpls_lam"]   = st.select_slider(
             "Smoothness (λ)",
-            options=[1e3, 1e4, 1e5, 5e5, 1e6, 5e6, 1e7, 1e8],
-            value=1e6,
+            options=[1e2, 1e3, 1e4, 1e5, 5e5, 1e6, 5e6, 1e7, 1e8],
+            value=1e3,
             format_func=lambda v: f"{v:.0e}",
             key="chi_airpls_lam",
         )
@@ -396,7 +396,7 @@ def _bg_settings_ui() -> tuple[str, dict]:
         params["sv_fraction"] = st.select_slider(
             "Sampling fraction",
             options=[0.01, 0.02, 0.03, 0.05, 0.07, 0.10, 0.15, 0.20],
-            value=0.02,
+            value=0.05,
             format_func=lambda v: f"{v*100:.0f}%",
             key="chi_sv_fraction",
             help="Fraction of points used as initial background estimate "
