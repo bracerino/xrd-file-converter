@@ -353,6 +353,7 @@ def _bg_settings_ui() -> tuple[str, dict]:
         "Background method",
         ["None", "Polynomial Fit", "SNIP Algorithm",
          "Rolling Ball", "airPLS", "Sonneveld-Visser"],
+        index=4,
         key="chi_bg_method",
     )
 
