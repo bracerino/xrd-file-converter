@@ -1659,11 +1659,16 @@ if __name__ == "__main__":
     <style>
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
-    header {visibility: hidden;}
+    [data-testid="stDecoration"] {display: none;}
+    [data-testid="stToolbarActions"] {display: none;}
+    .viewerBadge_link__qRIco {display: none;}
+    [data-testid="stStatusWidget"] {display: none;}
+    [data-testid="stSidebarCollapsedControl"] {visibility: visible !important; display: block !important;}
+    [data-testid="collapsedControl"] {visibility: visible !important; display: block !important;}
     </style>
     """
-    
     st.markdown(hide_streamlit_style, unsafe_allow_html=True)
+    
     css = '''
     <style>
     .stTabs [data-baseweb="tab-list"] button [data-testid="stMarkdownContainer"] p {
