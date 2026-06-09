@@ -1713,7 +1713,7 @@ if __name__ == "__main__":
 
     st.sidebar.title("XRD Converter Tools")
     st.sidebar.info(
-        "Visit also main app here: **[XRDlicious](xrdlicious.com)**. 🌀 Developed by **[IMPLANT team](https://implant.fs.cvut.cz/)**. "
+        "Visit also main app here: **[XRDlicious](https://xrdlicious.com)**. 🌀 Developed by **[IMPLANT team](https://implant.fs.cvut.cz/)**. "
         "**[Tutorial here](https://youtu.be/KwxVKadPZ6s?si=S1_67xF5J3sI7n69)**. Spot a bug or have a feature idea? Let us know at: "
         "**lebedmi2@cvut.cz**. To compile the app locally, visit our **[GitHub page](https://github.com/bracerino/xrd-file-converter)**. "
         "If you like the app, please cite **[article in IUCr](https://journals.iucr.org/j/issues/2025/05/00/hat5006/index.html).**"
