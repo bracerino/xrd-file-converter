@@ -166,178 +166,102 @@ def run_data_converter():
             return None, None, None
 
     def parse_raw_v1(file_content_bytes):
+        """Parse the Bruker RAW1.01 (RAW version 3 / DIFFRACplus) binary format.
+
+        Layout (little-endian):
+          * File header (712 bytes):
+              @8   file status (int32)
+              @12  number of ranges (int32)
+              @608 anode element symbol (2-char string)
+              @624 K-Alpha1 wavelength (double)
+              @632 K-Alpha2 wavelength (double)
+          * Each range begins with a range header:
+              cur+0   header length (int32, normally 304)
+              cur+4   number of steps (int32)
+              cur+8   start theta / omega (double)
+              cur+16  start 2-theta (double)
+              cur+176 step size / increment (double)
+            The intensity data (float32 per step) follows the range header.
+
+        The previous implementation guessed the angles by scanning for plausible
+        floats and assumed an omega rocking-curve, which produced wrong 2-theta
+        values for ordinary powder patterns. We now read the documented fields.
+        """
         metadata = {}
-        header_size = 1024
-        file_size = len(file_content_bytes)
-        if 'debug_messages' not in st.session_state:
-            st.session_state.debug_messages = []
+        data = file_content_bytes
+        file_size = len(data)
+        file_header_size = 712
 
         try:
-            num_points = (file_size - header_size) // 4
+            range_cnt = struct.unpack_from('<i', data, 12)[0]
+            if range_cnt < 1 or range_cnt > 1000:
+                range_cnt = 1
+
+            # X-ray anode / target.
+            try:
+                anode = struct.unpack_from('2s', data, 608)[0].decode(
+                    'ascii', errors='ignore').strip('\x00').strip()
+                if anode:
+                    metadata['X-ray Target'] = anode
+            except (struct.error, IndexError):
+                pass
+
+            # K-Alpha1 wavelength.
+            try:
+                wl = struct.unpack_from('<d', data, 624)[0]
+                if 0.3 < wl < 3.0:
+                    metadata['K-Alpha1 (Å)'] = f"{wl:.5f}"
+            except struct.error:
+                pass
+
+            cur = file_header_size
+            header_len = struct.unpack_from('<i', data, cur)[0]
+            if header_len < 304 or cur + header_len > file_size:
+                header_len = 304
+
+            num_points = struct.unpack_from('<i', data, cur + 4)[0]
+            start_theta = struct.unpack_from('<d', data, cur + 8)[0]
+            start_2theta = struct.unpack_from('<d', data, cur + 16)[0]
+            step_size = struct.unpack_from('<d', data, cur + 176)[0]
+
+            data_offset = cur + header_len
+            # Validate / recover the point count and data offset.
+            available = (file_size - data_offset) // 4
+            if num_points <= 0 or num_points > available:
+                num_points = available
             if num_points <= 0:
-                st.error("Invalid file size for RAW 1.01 format.")
+                st.error("Invalid number of data points for RAW 1.01 format.")
                 return None, None
+            # If a single range doesn't reach the end of file, the intensity
+            # block is the trailing num_points float32 values.
+            if range_cnt == 1 and (file_size - data_offset) != num_points * 4:
+                data_offset = file_size - num_points * 4
+
+            if not (np.isfinite(step_size) and 0 < abs(step_size) < 50):
+                st.warning("Could not read a valid step size; deriving it is not possible.")
+                step_size = 0.0
+            if not np.isfinite(start_2theta):
+                start_2theta = 0.0
+
+            intensities = np.frombuffer(
+                data, dtype=np.float32, count=num_points, offset=data_offset).astype(float)
+            angles = np.arange(num_points) * step_size + start_2theta
+            end_2theta = angles[-1] if num_points > 0 else start_2theta
+
             metadata['Number of Points'] = num_points
+            metadata['Start Angle (2θ, °)'] = f"{start_2theta:.4f}"
+            metadata['End Angle (2θ, °)'] = f"{end_2theta:.4f}"
+            metadata['Step Size (°)'] = f"{step_size:.5f}"
+            if np.isfinite(start_theta):
+                metadata['Start Angle (θ, °)'] = f"{start_theta:.4f}"
+            if range_cnt > 1:
+                metadata['Note'] = f"File contains {range_cnt} ranges; only the first is loaded."
 
-            st.session_state.debug_messages.append(
-                f"DEBUG: File size: {file_size} bytes, Header size: {header_size} bytes, Data points: {num_points}")
-            step_size = None
-            start_angle = None
-            end_angle = None
-
-            st.session_state.debug_messages.append("DEBUG: Scanning for step size information...")
-
-            step_size_candidates = []
-            for offset in range(200, min(1000, file_size - 4), 4):
-                try:
-                    value = struct.unpack_from('<f', file_content_bytes, offset)[0]
-                    if 0.0001 <= value <= 0.5 and not np.isnan(value) and not np.isinf(value):
-                        step_size_candidates.append((offset, value))
-                except (struct.error, ValueError):
-                    continue
-
-            if step_size_candidates:
-                expected_step = 0.4 / (num_points - 1) if num_points > 1 else 0.01
-
-                best_step = min(step_size_candidates, key=lambda x: abs(x[1] - expected_step))
-                if abs(best_step[1] - expected_step) < expected_step * 0.5:  # Within 50% of expected
-                    step_size = best_step[1]
-
-            st.session_state.debug_messages.append("DEBUG: Scanning for start and end angles...")
-
-            potential_offsets = [
-                924, 920, 916, 912, 908, 904, 900,
-                568, 564, 560, 556, 552, 548, 544,
-                300, 304, 308, 312, 316, 320,
-                400, 404, 408, 412, 416, 420,
-                500, 504, 508, 512, 516, 520,
-            ]
-
-            found_candidates = []
-
-            for offset in potential_offsets:
-                if offset + 4 <= file_size:
-                    try:
-                        value = struct.unpack_from('<f', file_content_bytes, offset)[0]
-                        if -10.0 <= value <= 10.0 and not np.isnan(value) and not np.isinf(value):
-                            found_candidates.append((offset, value))
-                    except (struct.error, ValueError):
-                        continue
-            if step_size is not None:
-                total_range = step_size * (num_points - 1)
-                if found_candidates:
-                    for offset, candidate_start in found_candidates:
-                        candidate_end = candidate_start + total_range
-                        if (-1.0 <= candidate_start <= 1.0 and -1.0 <= candidate_end <= 1.0):
-                            start_angle = candidate_start
-                            end_angle = candidate_end
-                            break
-                if start_angle is None:
-                    for offset, candidate_end in found_candidates:
-                        candidate_start = candidate_end - total_range
-                        if (-1.0 <= candidate_start <= 1.0 and -1.0 <= candidate_end <= 1.0):
-                            start_angle = candidate_start
-                            end_angle = candidate_end
-                            break
-            if start_angle is None or end_angle is None:
-                if len(found_candidates) >= 2:
-                    found_candidates.sort(key=lambda x: x[1])
-                    target_start = -0.2
-                    target_end = 0.2
-                    best_start = min(found_candidates, key=lambda x: abs(x[1] - target_start))
-                    best_end = min(found_candidates, key=lambda x: abs(x[1] - target_end))
-
-                    if abs(best_start[1] - target_start) < 0.1:
-                        start_angle = best_start[1]
-                        metadata['Start Angle (Omega)'] = f"{start_angle:.6f}"
-                    if abs(best_end[1] - target_end) < 0.1:
-                        end_angle = best_end[1]
-                        metadata['End Angle (Omega)'] = f"{end_angle:.6f}"
-
-                if start_angle is None or end_angle is None:
-                    for offset in range(400, min(1000, file_size - 8), 4):
-                        try:
-                            val1 = struct.unpack_from('<f', file_content_bytes, offset)[0]
-                            val2 = struct.unpack_from('<f', file_content_bytes, offset + 4)[0]
-                            if (-1.0 <= val1 <= 1.0 and -1.0 <= val2 <= 1.0 and
-                                    not np.isnan(val1) and not np.isnan(val2) and
-                                    not np.isinf(val1) and not np.isinf(val2) and
-                                    val1 != val2):
-
-                                range_size = abs(val2 - val1)
-                                if 0.1 <= range_size <= 2.0:
-                                    start_angle = min(val1, val2)
-                                    end_angle = max(val1, val2)
-                                    metadata['Start Angle (Omega)'] = f"{start_angle:.6f}"
-                                    metadata['End Angle (Omega)'] = f"{end_angle:.6f}"
-                                    break
-                        except (struct.error, ValueError):
-                            continue
-            if start_angle is None:
-                start_angle = -0.2
-                metadata['Start Angle (Omega)'] = f"{start_angle:.6f} (default)"
-
-            if end_angle is None:
-                end_angle = 0.2
-                metadata['End Angle (Omega)'] = f"{end_angle:.6f} (default)"
-            if step_size is None:
-                if start_angle is not None and end_angle is not None:
-                    step_size = (end_angle - start_angle) / (num_points - 1) if num_points > 1 else 0
-                else:
-                    step_size = 0.4 / (num_points - 1) if num_points > 1 else 0.01
-            metadata['Step Size (Omega, Calculated)'] = f"{step_size:.6f}"
-            try:
-                fixed_2theta = struct.unpack_from('<f', file_content_bytes, offset=568)[0]
-                if not np.isnan(fixed_2theta) and not np.isinf(fixed_2theta) and abs(fixed_2theta) < 180:
-                    metadata['Fixed 2-Theta Angle'] = f"{fixed_2theta:.4f}"
-                else:
-                    metadata['Fixed 2-Theta Angle'] = 'N/A'
-            except (struct.error, IndexError):
-                metadata['Fixed 2-Theta Angle'] = 'N/A'
-            try:
-                target_name_bytes = struct.unpack_from('2s', file_content_bytes, offset=608)[0]
-                target_name = target_name_bytes.decode('utf-8', errors='ignore').strip('\x00').strip()
-                metadata['X-ray Target'] = target_name if target_name else 'N/A'
-            except (struct.error, IndexError):
-                metadata['X-ray Target'] = 'N/A'
-            if step_size is not None and start_angle is not None:
-                angles = np.arange(num_points) * step_size + start_angle
-            elif start_angle is not None and end_angle is not None:
-                angles = np.linspace(start_angle, end_angle, num_points)
-            else:
-                default_start = -0.2
-                angles = np.arange(num_points) * step_size + default_start
-                start_angle = default_start
-                end_angle = angles[-1]
-
-            metadata['Start Angle (Omega)'] = f"{start_angle:.6f}"
-            metadata['End Angle (Omega)'] = f"{end_angle:.6f}"
-            try:
-                intensities = np.frombuffer(
-                    file_content_bytes,
-                    dtype=np.float32,
-                    count=num_points,
-                    offset=header_size
-                )
-                if len(intensities) != num_points:
-                    st.error(f"DEBUG: Expected {num_points} intensities, got {len(intensities)}")
-                    return None, None
-            except Exception as e:
-                st.error(f"DEBUG: Failed to read intensity data: {e}")
-                return None, None
             data_df = pd.DataFrame({'2Theta': angles, 'Intensity': intensities})
-            st.info("Omega scan data has been loaded. The scan axis (Omega) is displayed as '2Theta' in the plot.")
-
-            with st.expander("Show Parser Debugging Info"):
-                st.code("\n".join(st.session_state.debug_messages), language='text')
-            st.session_state.debug_messages = []
-
             return metadata, data_df
 
         except Exception as e:
             st.error(f"Failed to parse RAW 1.01 file. Error: {e}")
-            import traceback
-            st.error(f"DEBUG: Full traceback:\n{traceback.format_exc()}")
             return None, None
 
     def parse_raw_v4(file_content_bytes):
@@ -397,13 +321,107 @@ def run_data_converter():
             st.error(f"A critical error occurred while parsing the RAW v4 file. Error: {e}")
             return None, None
 
+    def _raw4_find_anode(file_content_bytes, scan_off, kalpha):
+        """Best-effort detection of the X-ray anode for a RAW4 file."""
+        anodes = {'Cu': 1.54060, 'Co': 1.78900, 'Cr': 2.28970, 'Fe': 1.93600,
+                  'Mo': 0.70930, 'Ag': 0.55940, 'Ni': 1.65910, 'Mn': 2.10310,
+                  'W': 1.47640}
+        header = file_content_bytes[:scan_off]
+        # The anode element symbol is stored as a null-delimited token.
+        for sym in anodes:
+            if (b'\x00' + sym.encode() + b'\x00') in header:
+                return sym
+        # Fall back to inferring the anode from the measured wavelength.
+        if kalpha:
+            try:
+                wl = float(kalpha)
+                best = min(anodes, key=lambda s: abs(anodes[s] - wl))
+                if abs(anodes[best] - wl) < 0.02:
+                    return best
+            except ValueError:
+                pass
+        return None
+
+    def parse_raw4(file_content_bytes):
+        """Parse the Bruker RAW4.00 binary format.
+
+        Unlike the older RAW formats, RAW4 begins with variable-length metadata
+        records (USER, SAMPLEID, COMMENT, ...), so the scan parameters do not sit
+        at a fixed offset. Instead we locate the scan-range block by its
+        signature: a double start angle (2theta), a double step size and an int32
+        number of points, immediately followed by an intensity block of that many
+        float32 values that ends at the end of the file.
+        """
+        metadata = {}
+        data = file_content_bytes
+        fs = len(data)
+        try:
+            scan_off = None
+            s_ang = st_size = npts = None
+            for o in range(8, fs - 20):
+                try:
+                    start = struct.unpack_from('<d', data, o)[0]
+                    step = struct.unpack_from('<d', data, o + 8)[0]
+                    n = struct.unpack_from('<i', data, o + 16)[0]
+                except struct.error:
+                    continue
+                if not (-180.0 <= start <= 180.0):
+                    continue
+                if not (1e-6 < step < 5.0):
+                    continue
+                if not (2 <= n <= 50_000_000):
+                    continue
+                if n * 4 > fs - 20:
+                    continue
+                # The intensity block (float32) runs to the end of the file.
+                arr = np.frombuffer(data, dtype=np.float32, count=n, offset=fs - n * 4)
+                if not np.all(np.isfinite(arr)):
+                    continue
+                if arr.min() < 0 or arr.max() <= 0:
+                    continue
+                scan_off, s_ang, st_size, npts = o, start, step, n
+                break
+
+            if scan_off is None:
+                st.error("Could not locate the scan data block in the RAW4 file.")
+                return None, None
+
+            intensities = np.frombuffer(
+                data, dtype=np.float32, count=npts, offset=fs - npts * 4).astype(float)
+            angles = np.arange(npts) * st_size + s_ang
+
+            metadata['Start Angle (°)'] = f"{s_ang:.4f}"
+            metadata['Step Size (°)'] = f"{st_size:.5f}"
+            metadata['Number of Points'] = npts
+
+            # K-Alpha1 wavelength is stored as a double within the scan block.
+            try:
+                wl = struct.unpack_from('<d', data, scan_off + 40)[0]
+                if 0.3 < wl < 3.0:
+                    metadata['K-Alpha1 (Å)'] = f"{wl:.5f}"
+            except struct.error:
+                pass
+
+            target = _raw4_find_anode(data, scan_off, metadata.get('K-Alpha1 (Å)'))
+            if target:
+                metadata['X-ray Target'] = target
+
+            data_df = pd.DataFrame({'2Theta': angles, 'Intensity': intensities})
+            return metadata, data_df
+        except Exception as e:
+            st.error(f"A critical error occurred while parsing the RAW4 file. Error: {e}")
+            return None, None
+
     def parse_raw(file_content_bytes):
 
         if file_content_bytes.startswith(b'RAW1.01'):
             st.success("Assuming Bruker RAW 1.01 file format.")
             return parse_raw_v1(file_content_bytes)
+        elif file_content_bytes.startswith(b'RAW4'):
+            st.success("Assuming Bruker RAW4 file format.")
+            return parse_raw4(file_content_bytes)
         else:
-            st.success("Assuming Bruker RAW v4 file format.")
+            st.success("Assuming older Bruker RAW (v2/v3) file format.")
             return parse_raw_v4(file_content_bytes)
 
     def parse_xy(file_content):
@@ -1519,8 +1537,14 @@ def run_data_converter():
                     st.markdown("#### 📈 Diffraction Pattern")
                     fig = go.Figure(
                         go.Scatter(x=data_df['2Theta'], y=data_df['Intensity'], mode='lines', name='Intensity'))
-                    fig.update_layout(title=f"Data from {first_file.name}", xaxis_title="2θ (°)",
-                                      yaxis_title="Intensity (counts)", height=550, margin=dict(l=40, r=40, t=50, b=40))
+                    fig.update_layout(
+                        title=dict(text=f"Data from {first_file.name}", font=dict(size=24)),
+                        xaxis_title="2θ (°)", yaxis_title="Intensity (counts)",
+                        height=550, margin=dict(l=40, r=40, t=60, b=40),
+                        font=dict(size=18),
+                        xaxis=dict(title_font=dict(size=22), tickfont=dict(size=16)),
+                        yaxis=dict(title_font=dict(size=22), tickfont=dict(size=16)),
+                        legend=dict(font=dict(size=18)))
                     st.plotly_chart(fig, width='stretch')
 
 
@@ -1611,8 +1635,14 @@ def run_data_converter():
                     st.markdown("#### 📈 Diffraction Pattern")
                     fig = go.Figure(
                         go.Scatter(x=data_df['2Theta'], y=data_df['Intensity'], mode='lines', name='Intensity'))
-                    fig.update_layout(title=f"Data from {first_file.name}", xaxis_title="2θ (°)",
-                                      yaxis_title="Intensity", height=550, margin=dict(l=40, r=40, t=50, b=40))
+                    fig.update_layout(
+                        title=dict(text=f"Data from {first_file.name}", font=dict(size=24)),
+                        xaxis_title="2θ (°)", yaxis_title="Intensity",
+                        height=550, margin=dict(l=40, r=40, t=60, b=40),
+                        font=dict(size=18),
+                        xaxis=dict(title_font=dict(size=22), tickfont=dict(size=16)),
+                        yaxis=dict(title_font=dict(size=22), tickfont=dict(size=16)),
+                        legend=dict(font=dict(size=18)))
                     st.plotly_chart(fig, width='stretch')
 
 
