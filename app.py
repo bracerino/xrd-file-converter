@@ -1438,8 +1438,8 @@ def run_data_converter():
     #)
     st.info(
         "📄🔁📄 Upload one or more data powder diffraction files to convert them to a different format. .**xy ➡️ .xrdml, .ras, .raw**. "
-        "Or **.xrdml, .ras, .raw ➡️ .xy**. \n\n ⚠️ Older **.raw** format can currently produce incorrect x-axis values. "
-        "Check if they are correct in the converted .xy format. \n\n **Batch mode** is automatically activated when multiple files are uploaded.")
+        "Or **.xrdml, .ras, .raw ➡️ .xy**. \n\n ℹ️ For **.raw** (Bruker) files, please check that the converted "
+        "axis values are reasonable. \n\n **Batch mode** is automatically activated when multiple files are uploaded.")
 
     uploaded_files_raw = st.file_uploader("Upload Data File(s)",
                                           type=["xrdml", "xml", "ras", "xy", "dat", "txt", "raw", "csv"],
