@@ -11,6 +11,7 @@ import struct
 
 from xrd_conversion import run_axis_converter, convert_xaxis_data, get_axis_label
 from chi_scan_section import run_chi_scan_section
+from chi_merge_section import run_chi_merge_section
 
 def run_data_converter():
     def extract_key_ras_metadata(metadata_dict):
@@ -1751,7 +1752,8 @@ if __name__ == "__main__":
     st.sidebar.title("Select between format and X/Y-Axis Conversion")
     tool_choice = st.sidebar.radio(
         "**Select Tool:**",
-        ["📄 File Format Converter", "🔄 X/Y-Axis Converter", "🌐 Chi-Scan Viewer"],
+        ["📄 File Format Converter", "🔄 X/Y-Axis Converter", "🌐 Chi-Scan Viewer",
+         "🧬 Multiple .xy merge"],
         index=0
     )
 
@@ -1761,5 +1763,7 @@ if __name__ == "__main__":
     elif tool_choice == "🌐 Chi-Scan Viewer":
 
         run_chi_scan_section()
+    elif tool_choice == "🧬 Multiple .xy merge":
+        run_chi_merge_section()
     else:
         run_axis_converter()
