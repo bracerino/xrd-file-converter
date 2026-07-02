@@ -519,6 +519,11 @@ def _bg_settings_ui() -> tuple[str, dict]:
 
 def run_chi_scan_section():
     st.markdown("### 🌐 2D Chi-Scan Viewer & Analyser")
+    with st.expander("How to **Cite**", icon="📚", expanded=False):
+        st.markdown("""
+        If you like the app, please cite the following source:
+        - **XRDlicious, 2025** – [Lebeda, Miroslav, et al. XRDlicious: an interactive web-based platform for online calculation of diffraction patterns and radial distribution functions from crystal structures. Applied Crystallography, 2025, 58.5.](https://doi.org/10.1107/S1600576725005370).
+        """)
     st.info(
         "Upload a **PANalytical Empyrean** (or compatible) CSV file containing a "
         "chi-scan: columns *2Theta position*, *Chi position*, *Intensity*. "
