@@ -1462,7 +1462,27 @@ def run_data_converter():
         else:
             st.success(f"✅ Successfully uploaded **1** file (**.{first_file_ext}** format)")
 
-        first_file = uploaded_files[0]
+        # In batch mode the user can pick which file is shown in the preview.
+        # The controlling slider is rendered below the preview plot; read its
+        # stored value here (before the widget itself exists).
+        preview_idx = 0
+        if len(uploaded_files) > 1:
+            names = [f.name for f in uploaded_files]
+            stored_name = st.session_state.get("ffc_preview_file_name")
+            if stored_name in names:
+                preview_idx = names.index(stored_name)
+            elif stored_name is not None:
+                del st.session_state["ffc_preview_file_name"]
+
+        def _render_preview_file_slider():
+            if len(uploaded_files) > 1:
+                st.select_slider(
+                    "Preview file",
+                    options=[f.name for f in uploaded_files],
+                    key="ffc_preview_file_name",
+                )
+
+        first_file = uploaded_files[preview_idx]
         file_ext = first_file_ext
         data_df = None
         is_batch = len(uploaded_files) > 1
@@ -1547,6 +1567,7 @@ def run_data_converter():
                         yaxis=dict(title_font=dict(size=22), tickfont=dict(size=16)),
                         legend=dict(font=dict(size=18)))
                     st.plotly_chart(fig, width='stretch')
+                    _render_preview_file_slider()
 
 
         elif file_ext in ['xy', 'dat', 'txt']:
@@ -1561,15 +1582,18 @@ def run_data_converter():
                         st.info(f"These settings will be applied to all **{len(uploaded_files)} files**.")
                     output_format = st.selectbox("Select Output Format", ['XRDML', 'RAS', 'RAW'])
 
-                    df_state_key = f"meta_df_{output_format}_{first_file.name}"
-                    if st.session_state.get('last_file_format_choice') != (first_file.name, output_format):
+                    # Metadata settings apply to all uploaded files, so key the
+                    # table state by output format only (not the previewed file)
+                    # — switching the preview file then keeps the edited values.
+                    df_state_key = f"meta_df_{output_format}"
+                    if st.session_state.get('last_file_format_choice') != output_format:
                         st.session_state[df_state_key] = get_default_metadata(output_format)
-                        st.session_state['last_file_format_choice'] = (first_file.name, output_format)
+                        st.session_state['last_file_format_choice'] = output_format
 
                     edited_df = st.data_editor(st.session_state[df_state_key], num_rows="dynamic", height=425,
                                                key=f"editor_{output_format}")
 
-                    if st.button("Apply Changes & Prepare Download", width='stretch'):
+                    if st.button("Apply Changes & Prepare Download", type="primary", width='stretch'):
                         st.session_state[df_state_key] = edited_df
                         st.success(f"Settings applied. {output_format} file is ready for download below.")
 
@@ -1645,6 +1669,7 @@ def run_data_converter():
                         yaxis=dict(title_font=dict(size=22), tickfont=dict(size=16)),
                         legend=dict(font=dict(size=18)))
                     st.plotly_chart(fig, width='stretch')
+                    _render_preview_file_slider()
 
 
 import streamlit.components.v1 as components
@@ -1743,7 +1768,7 @@ if __name__ == "__main__":
     st.markdown(css, unsafe_allow_html=True)
 
     st.sidebar.title("XRD Converter Tools")
-    st.sidebar.caption("**v0.4** — 2026-07-01")
+    st.sidebar.caption("**v0.5** — 2026-07-02")
     st.sidebar.info(
         "Visit also main app here: **[XRDlicious](https://xrdlicious.com)**. 🌀 Developed by **[IMPLANT team](https://implant.fs.cvut.cz/)**. "
         "**[Tutorial here](https://youtu.be/KwxVKadPZ6s?si=S1_67xF5J3sI7n69)**. Spot a bug or have a feature idea? Let us know at: "
