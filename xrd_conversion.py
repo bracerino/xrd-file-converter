@@ -8,6 +8,103 @@ from io import StringIO, BytesIO
 import zipfile
 
 
+BG_METHODS = [
+    "None",
+    "Polynomial Fit",
+    "SNIP Algorithm",
+    "Rolling Ball Algorithm",
+    "airPLS (Adaptive Baseline)",
+]
+
+
+def compute_background(x, y, method, params):
+    """Estimate the background/baseline of an XRD pattern.
+
+    Returns an array the same length as ``y`` holding the estimated
+    background. Supported methods match ``BG_METHODS``.
+    """
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+
+    if method == "Polynomial Fit":
+        poly_degree = int(params.get("poly_degree", 6))
+        n_iters = int(params.get("n_iters", 40))
+        sort_idx = np.argsort(x)
+        xs, ys_sorted = x[sort_idx], y[sort_idx]
+        ywork = ys_sorted.copy()
+        for _ in range(n_iters):
+            try:
+                coeffs = np.polyfit(xs, ywork, poly_degree)
+                fitted = np.polyval(coeffs, xs)
+            except Exception:
+                fitted = ywork
+            ywork = np.minimum(ywork, fitted)
+        coeffs = np.polyfit(xs, ywork, poly_degree)
+        bg_sorted = np.polyval(coeffs, xs)
+        unsort = np.argsort(sort_idx)
+        return bg_sorted[unsort]
+
+    elif method == "SNIP Algorithm":
+        snip_iters = int(params.get("snip_iters", 20))
+        v = np.log(np.log(np.sqrt(np.maximum(y, 0.0) + 1.0) + 1.0) + 1.0)
+        for p in range(1, snip_iters + 1):
+            avg = (np.roll(v, p) + np.roll(v, -p)) / 2.0
+            v_new = np.minimum(v, avg)
+            v_new[:p] = v[:p]
+            v_new[-p:] = v[-p:]
+            v = v_new
+        return np.maximum((np.exp(np.exp(v) - 1.0) - 1.0) ** 2 - 1.0, 0.0)
+
+    elif method == "Rolling Ball Algorithm":
+        from scipy.signal import savgol_filter as _savgol
+        ball_radius = int(params.get("ball_radius", 30))
+        ball_smoothing = int(params.get("ball_smoothing", 3))
+        ys = y.copy()
+        if ball_smoothing > 0:
+            wlen = min(len(ys) // 10, 20)
+            if wlen % 2 == 0:
+                wlen += 1
+            if wlen >= 3:
+                for _ in range(ball_smoothing):
+                    ys = _savgol(ys, wlen, 2)
+        return np.array([
+            np.min(ys[max(0, i - ball_radius):
+                      min(len(ys), i + ball_radius + 1)])
+            for i in range(len(ys))
+        ])
+
+    else:  # airPLS (Adaptive Baseline) — asymmetric least squares
+        from scipy.sparse import diags as _sp_diags
+        from scipy.sparse.linalg import spsolve as _spsolve
+        lam = float(params.get("lam", 1e6))
+        p = float(params.get("p", 0.01))
+        n_iter = int(params.get("n_iter", 15))
+        yy = y.astype(float)
+        n = len(yy)
+        if n < 3:
+            return np.zeros_like(yy)
+        D = _sp_diags([1, -2, 1], [0, 1, 2], shape=(n - 2, n))
+        H = lam * D.T.dot(D)
+        w = np.ones(n)
+        z = yy.copy()
+        for _ in range(n_iter):
+            W = _sp_diags(w, 0, shape=(n, n))
+            z = _spsolve((W + H).tocsc(), w * yy)
+            w = p * (yy > z) + (1 - p) * (yy <= z)
+        return z
+
+
+def remove_background(x, y, method, params):
+    """Return ``y`` with the estimated background subtracted (clipped at 0)."""
+    if not method or method == "None":
+        return np.asarray(y, dtype=float)
+    try:
+        bg = compute_background(x, y, method, params)
+        return np.maximum(0.0, np.asarray(y, dtype=float) - bg)
+    except Exception:
+        return np.asarray(y, dtype=float)
+
+
 def parse_xy_simple(file_content):
     try:
         lines = file_content.splitlines()
@@ -239,7 +336,9 @@ def run_axis_converter():
         """)
     st.info(
         "📊 Convert your XRD data between different x-axis formats: "
-        "**2θ** (different wavelengths) ↔️ **d-spacing** ↔️ **q-vector**. "
+        "**2θ** (different wavelengths) ↔️ **d-spacing** ↔️ **q-vector**, "
+        "apply **divergence slit** corrections (fixed ↔️ auto), and "
+        "**remove the background** from the intensity. "
         "Upload single or multiple files - batch mode activates automatically."
     )
 
@@ -256,7 +355,22 @@ def run_axis_converter():
     uploaded_files = uploaded_files_raw if isinstance(uploaded_files_raw, list) else [uploaded_files_raw]
 
     is_batch = len(uploaded_files) > 1
-    first_file = uploaded_files[0]
+
+    # Which file is shown in the preview column. In batch mode a slider below
+    # the plot lets the user switch files; its value is stored in session_state
+    # so it can be read here (before the widget itself is rendered).
+    preview_idx = 0
+    if is_batch:
+        names = [f.name for f in uploaded_files]
+        stored_name = st.session_state.get("preview_file_name")
+        if stored_name in names:
+            preview_idx = names.index(stored_name)
+        elif stored_name is not None:
+            # Uploaded files changed; drop the stale selection so the
+            # select_slider below doesn't error on an invalid option.
+            del st.session_state["preview_file_name"]
+
+    first_file = uploaded_files[preview_idx]
 
     file_content = first_file.getvalue().decode("utf-8", errors='replace')
     data_df = parse_xy_simple(file_content)
@@ -274,7 +388,8 @@ def run_axis_converter():
             st.success(f"✅ **Batch mode active:** {len(uploaded_files)} files uploaded")
             st.caption("Settings will apply to all files")
 
-        tab1, tab2 = st.tabs(["📐 X-Axis", "📊 Y-Axis"])
+        tab1, tab2, tab3 = st.tabs(
+            ["📐 X-Axis", "📊 Y-Axis", "🧹 Background"])
 
         with tab1:
             st.markdown("##### Format Conversion")
@@ -473,6 +588,68 @@ def run_axis_converter():
             if normalize_y:
                 st.success("✅ Normalization will scale the strongest peak to 100%")
 
+        with tab3:
+            st.markdown("##### Background Removal")
+            st.caption(
+                "Estimate and subtract the background from the intensity. "
+                "The result is previewed on the right; use the toggle below "
+                "the graph to apply it to the converted/downloaded data."
+            )
+
+            bg_method = st.radio(
+                "Background Estimation Method",
+                BG_METHODS,
+                index=0,
+                key="bg_method",
+                horizontal=True,
+            )
+
+            bg_params = {}
+            if bg_method == "Polynomial Fit":
+                bg_params["poly_degree"] = st.slider(
+                    "Polynomial Degree", 1, 15, 6, 1, key="bg_poly_degree",
+                    help="Higher degree follows the baseline more closely.")
+                bg_params["n_iters"] = st.slider(
+                    "Iterations", 1, 200, 40, 1, key="bg_poly_iters",
+                    help="More iterations suppress peaks more aggressively "
+                         "before fitting.")
+            elif bg_method == "SNIP Algorithm":
+                bg_params["snip_iters"] = st.slider(
+                    "SNIP Iterations (M)", 1, 100, 20, 1, key="bg_snip_iters",
+                    help="Controls the maximum half-width of spectral features "
+                         "that are removed. Larger M removes broader peaks / "
+                         "follows a more gradually varying baseline.")
+            elif bg_method == "Rolling Ball Algorithm":
+                bg_params["ball_radius"] = st.slider(
+                    "Ball Radius", 1, 100, 30, 1, key="bg_ball_radius")
+                bg_params["ball_smoothing"] = st.slider(
+                    "Smoothing Passes", 0, 10, 3, 1, key="bg_ball_smoothing")
+            elif bg_method == "airPLS (Adaptive Baseline)":
+                bg_params["lam"] = st.select_slider(
+                    "Smoothness (λ)",
+                    options=[1e3, 1e4, 1e5, 5e5, 1e6, 5e6, 1e7, 1e8],
+                    value=1e6, format_func=lambda v: f"{v:.0e}",
+                    key="bg_airpls_lam",
+                    help="Higher = smoother/flatter baseline. 1e5–1e7 suits "
+                         "most diffraction data.")
+                bg_params["p"] = st.slider(
+                    "Asymmetry (p)", 0.001, 0.05, 0.01, 0.001, format="%.3f",
+                    key="bg_airpls_p",
+                    help="Fraction of points considered background. "
+                         "Lower = baseline hugs the valley more tightly.")
+                bg_params["n_iter"] = st.slider(
+                    "Iterations", 5, 50, 15, 1, key="bg_airpls_iters")
+
+            if bg_method != "None":
+                st.success(
+                    "✅ Background removal is applied to the downloaded data."
+                    + (" (same method/parameters for every file in batch mode)"
+                       if is_batch else ""))
+
+        # Background subtraction is applied to the output whenever a method
+        # other than "None" is selected.
+        bg_active = bg_method != "None"
+
         st.markdown("---")
 
         st.markdown("#### 💾 Download Options")
@@ -482,7 +659,8 @@ def run_axis_converter():
         any_conversion = (input_format != 'No conversion' and output_format) or \
                          slit_conversion_type != "No conversion" or \
                          normalize_y or \
-                         y_scale != "linear"
+                         y_scale != "linear" or \
+                         bg_active
 
         if any_conversion:
             if is_batch:
@@ -499,6 +677,10 @@ def run_axis_converter():
                             if df is not None:
                                 x_data = df['X'].values
                                 y_data = df['Y'].values
+
+                                if bg_active:
+                                    y_data = remove_background(
+                                        x_data, y_data, bg_method, bg_params)
 
                                 if input_format != 'No conversion' and output_format:
                                     x_converted = convert_xaxis_data(
@@ -569,6 +751,10 @@ def run_axis_converter():
                 x_data = data_df['X'].values
                 y_data = data_df['Y'].values
 
+                if bg_active:
+                    y_data = remove_background(
+                        x_data, y_data, bg_method, bg_params)
+
                 if input_format != 'No conversion' and output_format:
                     x_converted = convert_xaxis_data(
                         x_data,
@@ -638,13 +824,43 @@ def run_axis_converter():
             line=dict(color='#0984e3', width=2)
         ))
 
-        x_display = data_df['X'].values
-        y_display = data_df['Y'].values
+        raw_x = data_df['X'].values
+        raw_y = data_df['Y'].values
+
+        # Estimate the background on the raw pattern (before any x-conversion).
+        bg_curve = None
+        if bg_method != "None":
+            try:
+                bg_curve = compute_background(raw_x, raw_y, bg_method, bg_params)
+            except Exception as e:
+                st.warning(f"⚠️ Background estimation failed: {e}")
+                bg_curve = None
+
+        if bg_curve is not None:
+            fig.add_trace(go.Scatter(
+                x=raw_x, y=bg_curve, mode='lines', name='Background',
+                line=dict(color='#636e72', width=2, dash='dot')
+            ))
+            fig.add_trace(go.Scatter(
+                x=raw_x, y=np.maximum(0.0, raw_y - bg_curve), mode='lines',
+                name='Background subtracted',
+                line=dict(color='#00b894', width=2)
+            ))
+
+        # Intensity that feeds the conversion pipeline: background-subtracted
+        # only when the user opted to apply it (toggle below the graph).
+        if bg_active and bg_curve is not None:
+            base_y = np.maximum(0.0, raw_y - bg_curve)
+        else:
+            base_y = raw_y
+
+        x_display = raw_x
+        y_display = base_y
         x_axis_title = "X-axis"
 
         if input_format != 'No conversion' and output_format:
             x_converted = convert_xaxis_data(
-                data_df['X'].values,
+                raw_x,
                 input_format,
                 output_format,
                 input_wavelength,
@@ -653,7 +869,7 @@ def run_axis_converter():
 
             valid_mask = ~np.isnan(x_converted)
             x_display = x_converted[valid_mask]
-            y_display = data_df['Y'].values[valid_mask]
+            y_display = base_y[valid_mask]
 
             x_axis_title = get_axis_label(output_format, output_wavelength)
 
@@ -725,6 +941,16 @@ def run_axis_converter():
         )
 
         st.plotly_chart(fig)
+
+        if is_batch:
+            st.select_slider(
+                "Preview file (with applied conversion)",
+                options=[f.name for f in uploaded_files],
+                key="preview_file_name",
+            )
+            st.caption(
+                f"Previewing file {preview_idx + 1} of {len(uploaded_files)}: "
+                f"**{first_file.name}**")
 
         if any_conversion:
             col_stat1, col_stat2 = st.columns(2)
