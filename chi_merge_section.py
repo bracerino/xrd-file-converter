@@ -214,19 +214,20 @@ def _make_zip(x, variants, peaks_tt, peaks_int, base_name):
 # --------------------------------------------------------------------------- #
 def run_chi_merge_section():
     st.markdown("### 🧬 .xy Pattern Merge (Maximum Projection)")
+    with st.expander("How to **Cite**", icon="📚", expanded=False):
+        st.markdown("""
+        If you like the app, please cite the following source:
+        - **XRDlicious, 2025** – [Lebeda, Miroslav, et al. XRDlicious: an interactive web-based platform for online calculation of diffraction patterns and radial distribution functions from crystal structures. Applied Crystallography, 2025, 58.5.](https://doi.org/10.1107/S1600576725005370).
+        """)
     st.info(
-        "Upload a series of two-column **.xy** patterns (`X  Intensity`) that you want "
-        "to merge into a single pattern. For coarse-grained / spotty samples a plain "
-        "average dilutes reflections that appear in only one scan into the background. "
-        "This tool instead takes the **per-point maximum across all patterns**, "
-        "preserving every peak.\n\n"
-        "This works on **any** mergeable .xy data. If the filenames encode a sample "
-        "inclination (**χ tilt**, e.g. `...Chi=12.00.xy`) it is read automatically and "
-        "used for labelling / ordering — otherwise the upload order is used.\n\n"
-        "⚠️ **Max-projection intensities are not quantitative** (a peak's height "
-        "reflects how many grains happened to diffract, not phase fraction). Use the "
-        "merged pattern for peak finding / phase ID only — for Rietveld / quantitative "
-        "refinement use the raw data."
+        "Merge two-column **.xy** patterns (`X  Intensity`) across all scans. "
+        "The default **per-point maximum** preserves peaks that appear in only "
+        "one scan (ideal for coarse-grained / spotty samples), but a plain "
+        "**average** is also provided if you just want to combine the patterns.\n\n"
+        "χ tilt encoded in filenames (e.g. `...Chi=12.00.xy`) is read "
+        "automatically for labelling / ordering; otherwise upload order is used.\n\n"
+        "ℹ️ Max-projection intensities are **not quantitative** — use the merged "
+        "pattern for peak finding / phase ID only, and the raw data for Rietveld."
     )
 
     uploaded = st.file_uploader(
