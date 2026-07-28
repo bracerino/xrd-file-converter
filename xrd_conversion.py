@@ -342,10 +342,20 @@ def run_axis_converter():
         "Upload single or multiple files - batch mode activates automatically."
     )
 
+    # The uploader key holds a counter. Incrementing it (in the clear button
+    # callback below) forces Streamlit to mount a fresh, empty file_uploader,
+    # which is the reliable way to programmatically remove all uploaded files.
+    if "axis_uploader_key" not in st.session_state:
+        st.session_state.axis_uploader_key = 0
+
+    def _clear_axis_uploaded_files():
+        st.session_state.axis_uploader_key += 1
+
     uploaded_files_raw = st.file_uploader(
         "Upload XRD Data File(s) (.xy, .txt, .dat, .csv)",
         type=["xy", "txt", "dat", "csv", "data"],
-        accept_multiple_files=True
+        accept_multiple_files=True,
+        key=f"axis_file_uploader_{st.session_state.axis_uploader_key}"
     )
 
     if not uploaded_files_raw:
@@ -382,7 +392,58 @@ def run_axis_converter():
     col1, col2 = st.columns([1, 1.5])
 
     with col1:
-        st.markdown("#### ⚙️ Conversion Settings")
+        hdr_col, btn_col = st.columns([1.5, 1])
+        with hdr_col:
+            st.markdown("#### ⚙️ Conversion Settings")
+        with btn_col:
+            st.markdown(
+                """
+                <style>
+                /* Friendly blue for the primary action buttons
+                   (apply / prepare / download). */
+                button[data-testid^="stBaseButton-primary"] {
+                    background-color: #3b82f6;
+                    border-color: #3b82f6;
+                    color: #ffffff;
+                }
+                button[data-testid^="stBaseButton-primary"]:hover {
+                    background-color: #2563eb;
+                    border-color: #2563eb;
+                    color: #ffffff;
+                }
+                /* A deeper blue for the actual file-download buttons, to set
+                   them apart from the "prepare / apply" buttons. */
+                [data-testid="stDownloadButton"] button {
+                    background-color: #0e4d92;
+                    border-color: #0e4d92;
+                    color: #ffffff;
+                }
+                [data-testid="stDownloadButton"] button:hover {
+                    background-color: #0a3a6e;
+                    border-color: #0a3a6e;
+                    color: #ffffff;
+                }
+                /* Light gray for the "Remove all files" button (more
+                   specific, so it wins over the blue rule above). */
+                .st-key-remove_all_files_axis button[data-testid^="stBaseButton-primary"] {
+                    background-color: #9ca3af;
+                    border-color: #9ca3af;
+                    color: #ffffff;
+                }
+                .st-key-remove_all_files_axis button[data-testid^="stBaseButton-primary"]:hover {
+                    background-color: #868e96;
+                    border-color: #868e96;
+                    color: #ffffff;
+                }
+                </style>
+                """,
+                unsafe_allow_html=True,
+            )
+            st.button("🗑️ Remove all files",
+                      key="remove_all_files_axis",
+                      on_click=_clear_axis_uploaded_files,
+                      type="primary",
+                      use_container_width=True)
 
         if is_batch:
             st.success(f"✅ **Batch mode active:** {len(uploaded_files)} files uploaded")

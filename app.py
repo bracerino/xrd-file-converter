@@ -1441,9 +1441,19 @@ def run_data_converter():
         "Or **.xrdml, .ras, .raw ➡️ .xy**. \n\n ℹ️ For **.raw** (Bruker) files, please check that the converted "
         "axis values are reasonable. \n\n **Batch mode** is automatically activated when multiple files are uploaded.")
 
+    # The uploader key holds a counter. Incrementing it (in the clear button
+    # callback below) forces Streamlit to mount a fresh, empty file_uploader,
+    # which is the reliable way to programmatically remove all uploaded files.
+    if "uploader_key" not in st.session_state:
+        st.session_state.uploader_key = 0
+
+    def _clear_uploaded_files():
+        st.session_state.uploader_key += 1
+
     uploaded_files_raw = st.file_uploader("Upload Data File(s)",
                                           type=["xrdml", "xml", "ras", "xy", "dat", "txt", "raw", "csv"],
-                                          accept_multiple_files=True)
+                                          accept_multiple_files=True,
+                                          key=f"file_uploader_{st.session_state.uploader_key}")
 
     if uploaded_files_raw:
         if isinstance(uploaded_files_raw, list):
@@ -1455,12 +1465,63 @@ def run_data_converter():
         if not all(f.name.lower().split('.')[-1] == first_file_ext for f in uploaded_files):
             st.error("Error: Please upload files of the same format.")
             return
-        
-        if len(uploaded_files) > 1:
-            st.success(
-                f"✅ Successfully uploaded **{len(uploaded_files)}** files (**.{first_file_ext}** format) - Batch mode activated")
-        else:
-            st.success(f"✅ Successfully uploaded **1** file (**.{first_file_ext}** format)")
+
+        msg_col, clear_col = st.columns([4, 1])
+        with msg_col:
+            if len(uploaded_files) > 1:
+                st.success(
+                    f"✅ Successfully uploaded **{len(uploaded_files)}** files (**.{first_file_ext}** format) - Batch mode activated")
+            else:
+                st.success(f"✅ Successfully uploaded **1** file (**.{first_file_ext}** format)")
+        with clear_col:
+            st.markdown(
+                """
+                <style>
+                /* Friendly blue for the primary action buttons
+                   (apply / prepare / download). */
+                button[data-testid^="stBaseButton-primary"] {
+                    background-color: #3b82f6;
+                    border-color: #3b82f6;
+                    color: #ffffff;
+                }
+                button[data-testid^="stBaseButton-primary"]:hover {
+                    background-color: #2563eb;
+                    border-color: #2563eb;
+                    color: #ffffff;
+                }
+                /* A deeper blue for the actual file-download buttons, to set
+                   them apart from the "prepare / apply" buttons. */
+                [data-testid="stDownloadButton"] button {
+                    background-color: #0e4d92;
+                    border-color: #0e4d92;
+                    color: #ffffff;
+                }
+                [data-testid="stDownloadButton"] button:hover {
+                    background-color: #0a3a6e;
+                    border-color: #0a3a6e;
+                    color: #ffffff;
+                }
+                /* Light gray for the "Remove all files" button (more
+                   specific, so it wins over the blue rule above). */
+                .st-key-remove_all_files_format button[data-testid^="stBaseButton-primary"] {
+                    background-color: #9ca3af;
+                    border-color: #9ca3af;
+                    color: #ffffff;
+                }
+                .st-key-remove_all_files_format button[data-testid^="stBaseButton-primary"]:hover {
+                    background-color: #868e96;
+                    border-color: #868e96;
+                    color: #ffffff;
+                }
+                </style>
+                """,
+                unsafe_allow_html=True,
+            )
+            st.button("🗑️ Remove all files",
+                      key="remove_all_files_format",
+                      on_click=_clear_uploaded_files,
+                      type="primary",
+                      use_container_width=True)
 
         # In batch mode the user can pick which file is shown in the preview.
         # The controlling slider is rendered below the preview plot; read its
@@ -1586,8 +1647,13 @@ def run_data_converter():
                     # table state by output format only (not the previewed file)
                     # — switching the preview file then keeps the edited values.
                     df_state_key = f"meta_df_{output_format}"
+                    # Tracks whether the user has clicked "Apply Changes" for the
+                    # current output format; the download section only appears once
+                    # this is True.
+                    applied_key = f"meta_applied_{output_format}"
                     if st.session_state.get('last_file_format_choice') != output_format:
                         st.session_state[df_state_key] = get_default_metadata(output_format)
+                        st.session_state[applied_key] = False
                         st.session_state['last_file_format_choice'] = output_format
 
                     edited_df = st.data_editor(st.session_state[df_state_key], num_rows="dynamic", height=425,
@@ -1595,12 +1661,13 @@ def run_data_converter():
 
                     if st.button("Apply Changes & Prepare Download", type="primary", width='stretch'):
                         st.session_state[df_state_key] = edited_df
+                        st.session_state[applied_key] = True
                         st.success(f"Settings applied. {output_format} file is ready for download below.")
 
                     file_extensions = {'XRDML': 'xrdml', 'RAS': 'ras', 'RAW': 'raw'}
                     file_extension = file_extensions.get(output_format, 'txt')
 
-                    if df_state_key in st.session_state:
+                    if st.session_state.get(applied_key):
                         applied_metadata_df = st.session_state[df_state_key]
                         if is_batch:
                             zip_buffer = BytesIO()
@@ -1768,7 +1835,7 @@ if __name__ == "__main__":
     st.markdown(css, unsafe_allow_html=True)
 
     st.sidebar.title("XRD Converter Tools")
-    st.sidebar.caption("**v0.5** — 2026-07-02")
+    st.sidebar.caption("**v0.5.1** — 2026-07-28")
     st.sidebar.info(
         "Visit also main app here: **[XRDlicious](https://xrdlicious.com)**. 🌀 Developed by **[IMPLANT team](https://implant.fs.cvut.cz/)**. "
         "**[Tutorial here](https://youtu.be/KwxVKadPZ6s?si=S1_67xF5J3sI7n69)**. Spot a bug or have a feature idea? Let us know at: "
