@@ -1742,34 +1742,126 @@ def run_data_converter():
 import streamlit.components.v1 as components
 
 
+import base64
+import os
+
+
+@st.cache_data(show_spinner=False)
+def _logo_data_uri(relative_path):
+    """Return a base64 data URI for an image shipped with the app (or None)."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), relative_path)
+    try:
+        with open(path, 'rb') as fh:
+            return "data:image/png;base64," + base64.b64encode(fh.read()).decode('ascii')
+    except OSError:
+        return None
+
+
 def display_conversion_visual():
-    st.markdown("""
-    <div style="max-width: 800px; margin: 25px auto; text-align: center; padding: 35px; background: linear-gradient(135deg, #f8f9ff 0%, #e8f4fd 100%); border-radius: 20px; box-shadow: 0 6px 20px rgba(0,0,0,0.1);">
-        <div style="display: flex; align-items: center; justify-content: space-between; margin: 30px 0; flex-wrap: wrap; gap: 25px;">
-            <div style="display: flex; flex-direction: column; align-items: center; flex: 1; min-width: 160px;">
-                <div style="background: linear-gradient(135deg, #74b9ff, #0984e3); color: white; padding: 20px 25px; border-radius: 15px; box-shadow: 0 6px 20px rgba(116, 185, 255, 0.4); margin: 10px; min-width: 140px; text-align: center;">
-                    <div style="font-size: 1.4em; font-weight: bold; margin-bottom: 5px;">.xy</div>
-                    <div style="font-size: 1em; opacity: 0.9;">Generic XY Data</div>
+    col_visual, col_ad = st.columns([1, 2.6])
+
+    with col_visual:
+        st.markdown("""
+        <div style="margin: 25px 0; text-align: center; padding: 16px 12px; background: linear-gradient(135deg, #f8f9ff 0%, #e8f4fd 100%); border-radius: 14px; box-shadow: 0 4px 12px rgba(0,0,0,0.08);">
+            <div style="display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: nowrap;">
+                <div style="display: flex; flex-direction: column; align-items: center;">
+                    <div style="background: linear-gradient(135deg, #74b9ff, #0984e3); color: white; padding: 8px 10px; border-radius: 9px; box-shadow: 0 3px 9px rgba(116, 185, 255, 0.4); margin: 4px; min-width: 72px; text-align: center;">
+                        <div style="font-size: 0.85em; font-weight: bold; margin-bottom: 2px;">.xy</div>
+                        <div style="font-size: 0.6em; opacity: 0.9;">Generic XY Data</div>
+                    </div>
+                </div>
+                <div style="display: flex; flex-direction: column; align-items: center;">
+                    <div style="font-size: 1.3em; color: #6c5ce7; line-height: 1.1;">→</div>
+                    <div style="font-size: 1.3em; color: #6c5ce7; line-height: 1.1;">←</div>
+                </div>
+                <div style="display: flex; flex-direction: column; align-items: center;">
+                    <div style="background: linear-gradient(135deg, #74b9ff, #0984e3); color: white; padding: 6px 10px; border-radius: 8px; box-shadow: 0 3px 8px rgba(116, 185, 255, 0.4); margin: 3px; min-width: 82px; text-align: center;">
+                        <div style="font-size: 0.8em; font-weight: bold;">.xrdml</div>
+                        <div style="font-size: 0.58em; opacity: 0.9;">PANalytical XML</div>
+                    </div>
+                    <div style="background: linear-gradient(135deg, #74b9ff, #0984e3); color: white; padding: 6px 10px; border-radius: 8px; box-shadow: 0 3px 8px rgba(116, 185, 255, 0.4); margin: 3px; min-width: 82px; text-align: center;">
+                        <div style="font-size: 0.8em; font-weight: bold;">.ras</div>
+                        <div style="font-size: 0.58em; opacity: 0.9;">Rigaku ASCII</div>
+                    </div>
+                    <div style="background: linear-gradient(135deg, #74b9ff, #0984e3); color: white; padding: 6px 10px; border-radius: 8px; box-shadow: 0 3px 8px rgba(116, 185, 255, 0.4); margin: 3px; min-width: 82px; text-align: center;">
+                        <div style="font-size: 0.8em; font-weight: bold;">.raw</div>
+                        <div style="font-size: 0.58em; opacity: 0.9;">Bruker Binary</div>
+                    </div>
                 </div>
             </div>
-            <div style="display: flex; flex-direction: column; align-items: center; margin: 0 20px;">
-                <div style="font-size: 2.5em; color: #6c5ce7; margin: 3px 0;">→</div>
-                <div style="font-size: 2.5em; color: #6c5ce7; margin: 3px 0;">←</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col_ad:
+        display_ecm36_ad()
+
+
+def display_ecm36_ad():
+    """Announcement banner for ECM-36, the 36th European Crystallographic Meeting."""
+    logo = _logo_data_uri("images/ecm36_logo.png")
+    logo_html = (
+        f'<img src="{logo}" alt="ECM-36 Prague 2027 logo" '
+        f'style="width: 100%; max-width: 190px; height: auto;">'
+        if logo else
+        '<div style="font-size: 2.2em; font-weight: 800; color: #d63031;">ECM<br>XXXVI</div>'
+    )
+
+    important_dates = [
+        ("Nov 2026", "Call for abstracts"),
+        ("31 Mar 2027", "Bursary applications"),
+        ("15 Apr 2027", "Abstracts &mdash; oral contribution"),
+        ("31 May 2027", "Early-bird registration"),
+        ("15 Jun 2027", "Abstracts &mdash; posters"),
+        ("30 Jun 2027", "Standard registration"),
+    ]
+    dates_html = "".join(
+        f'<div style="background: #fff5f5; border: 1px solid #ffd0d0; border-radius: 9px; '
+        f'padding: 7px 12px; font-size: 0.86em; color: #2d3436;">'
+        f'<b>{when}</b><br><span style="opacity: 0.75;">{label}</span></div>'
+        for when, label in important_dates
+    )
+
+    st.markdown(f"""
+    <div style="margin: 25px 0; padding: 22px 26px; background: linear-gradient(135deg, #ffffff 0%, #eef3ff 100%);
+                border: 1px solid #d7e0f5; border-radius: 16px;
+                box-shadow: 0 6px 20px rgba(0,0,0,0.10);">
+        <div style="display: flex; align-items: center; gap: 24px; flex-wrap: wrap;">
+            <div style="flex: 0 0 190px; text-align: center; min-width: 140px;">
+                {logo_html}
             </div>
-            <div style="display: flex; flex-direction: column; align-items: center; flex: 2; min-width: 250px;">
-                <div style="background: linear-gradient(135deg, #74b9ff, #0984e3); color: white; padding: 15px 20px; border-radius: 12px; box-shadow: 0 5px 15px rgba(116, 185, 255, 0.4); margin: 6px; min-width: 120px; text-align: center;">
-                    <div style="font-size: 1.2em; font-weight: bold; margin-bottom: 3px;">.xrdml</div>
-                    <div style="font-size: 0.9em; opacity: 0.9;">PANalytical XML</div>
+            <div style="flex: 1; min-width: 260px;">
+                <div style="font-size: 1.45em; font-weight: 800; color: #1e3a8a; line-height: 1.25; margin: 0 0 2px 0;">
+                    ECM-36 &mdash; 36<sup>th</sup> European Crystallographic Meeting
                 </div>
-                <div style="background: linear-gradient(135deg, #74b9ff, #0984e3); color: white; padding: 15px 20px; border-radius: 12px; box-shadow: 0 5px 15px rgba(116, 185, 255, 0.4); margin: 6px; min-width: 120px; text-align: center;">
-                    <div style="font-size: 1.2em; font-weight: bold; margin-bottom: 3px;">.ras</div>
-                    <div style="font-size: 0.9em; opacity: 0.9;">Rigaku ASCII</div>
+                <div style="font-size: 1.05em; color: #2d3436; margin-bottom: 10px;">
+                    📅 <b>23&ndash;28 August 2027</b> &nbsp;•&nbsp; 📍 <b>Prague Congress Centre, Prague, Czech Republic</b>
                 </div>
-                <div style="background: linear-gradient(135deg, #74b9ff, #0984e3); color: white; padding: 15px 20px; border-radius: 12px; box-shadow: 0 5px 15px rgba(116, 185, 255, 0.4); margin: 6px; min-width: 120px; text-align: center;">
-                    <div style="font-size: 1.2em; font-weight: bold; margin-bottom: 3px;">.raw</div>
-                    <div style="font-size: 0.9em; opacity: 0.9;">Bruker Binary</div>
+                <div style="font-size: 0.95em; color: #34495e; line-height: 1.5;">
+                    Organised by the <b>European Crystallographic Association</b> together with the Czech Crystallographic
+                    Society, Charles University, the Czech Technical University and the Czech Academy of Sciences.
+                    Structural science from biology, pharmacy and chemistry to physics and materials science &mdash;
+                    X-ray, neutron and electron methods.
                 </div>
             </div>
+        </div>
+        <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px;">
+            {dates_html}
+        </div>
+        <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; align-items: center;">
+            <a href="http://www.xray.cz/ecm36/" target="_blank" rel="noopener"
+               style="background: linear-gradient(135deg, #74b9ff, #0984e3); color: white; text-decoration: none;
+                      padding: 9px 18px; border-radius: 9px; font-weight: 700; font-size: 0.95em;
+                      box-shadow: 0 4px 12px rgba(116, 185, 255, 0.4);">
+                🌐 Official website
+            </a>
+            <a href="https://ecanews.org/meetings/" target="_blank" rel="noopener"
+               style="color: #1e3a8a; text-decoration: none; padding: 9px 12px; border-radius: 9px;
+                      font-weight: 600; font-size: 0.92em; border: 1px solid #c7d4f0; background: #ffffff;">
+                📋 All ECA meetings
+            </a>
+        </div>
+        <div style="margin-top: 10px; font-size: 0.78em; color: #7f8c8d;">
+            Dates and deadlines as announced by the organisers &mdash; please check the official website for updates.
         </div>
     </div>
     """, unsafe_allow_html=True)
