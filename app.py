@@ -124,41 +124,174 @@ def run_data_converter():
             st.error(f"Failed to parse RAS file. Error: {e}")
             return None, None, None
 
+    def _decode_rasx_text(raw_bytes):
+        """RASX parts are UTF-8 with a BOM; older exports can be Shift-JIS."""
+        for encoding in ('utf-8-sig', 'shift_jis'):
+            try:
+                return raw_bytes.decode(encoding)
+            except UnicodeDecodeError:
+                continue
+        return raw_bytes.decode('utf-8', errors='replace')
+
+    def _rasx_metadata_from_conditions(root):
+        """Flatten a MesurementConditions XML tree into flat *.ras-style keys.
+
+        The XML already carries a <RASHeader> block holding the very same
+        `*KEY "value"` pairs that the flat .ras format uses, but Rigaku leaves
+        the most interesting ones out of it and stores them structurally
+        instead (generator, scan range, goniometer axes). So we take the
+        RASHeader pairs first and then fill the gaps from the structured
+        sections, which gives us a header that the .ras code paths understand.
+        """
+        metadata = {}
+
+        ras_header = root.find('RASHeader')
+        if ras_header is not None:
+            for pair in ras_header.findall('Pair'):
+                strings = pair.findall('string')
+                if len(strings) >= 2:
+                    key = (strings[0].text or '').lstrip('*').strip()
+                    if key:
+                        metadata[key] = (strings[1].text or '').strip()
+
+        def section_text(section_name, tag, default=''):
+            section = root.find(section_name)
+            if section is None:
+                return default
+            element = section.find(tag)
+            return (element.text or default).strip() if element is not None else default
+
+        def put(key, value):
+            # RASHeader stays authoritative wherever it actually has the key.
+            if value not in ('', None) and not metadata.get(key):
+                metadata[key] = value
+
+        for tag, key in (('Operator', 'FILE_OPERATOR'), ('UserGroup', 'FILE_USERGROUP'),
+                         ('Comment', 'FILE_COMMENT'), ('SampleName', 'FILE_SAMPLE'),
+                         ('Memo', 'FILE_MEMO'), ('Type', 'FILE_TYPE'),
+                         ('Version', 'FILE_VERSION'), ('SystemName', 'FILE_SYSTEM_NAME'),
+                         ('PackageName', 'FILE_PACKAGE_NAME'), ('PartName', 'FILE_PART_ID')):
+            put(key, section_text('GeneralInformation', tag))
+
+        generator = root.find('HWConfigurations/XrayGenerator')
+        if generator is not None:
+            def gen(tag, default=''):
+                element = generator.find(tag)
+                return (element.text or default).strip() if element is not None else default
+
+            put('HW_XG_TYPE', gen('Type'))
+            put('HW_XG_TARGET_NAME', gen('TargetName'))
+            put('HW_XG_TARGET_ATOMIC_NUMBER', gen('TargetAtomicNumber'))
+            put('HW_XG_FOCUS_SIZE', gen('FocusSize'))
+            put('HW_XG_FOCUS_TYPE', gen('FocusType'))
+            put('HW_XG_WAVE_TYPE', gen('WaveType'))
+            put('HW_XG_WAVE_LENGTH_ALPHA1', gen('WavelengthKalpha1'))
+            put('HW_XG_WAVE_LENGTH_ALPHA2', gen('WavelengthKalpha2'))
+            put('HW_XG_WAVE_LENGTH_BETA', gen('WavelengthKbeta'))
+            put('MEAS_COND_XG_VOLTAGE', gen('Voltage'))
+            put('MEAS_COND_XG_VOLTAGE_UNIT', gen('VoltageUnit'))
+            put('MEAS_COND_XG_CURRENT', gen('Current'))
+            put('MEAS_COND_XG_CURRENT_UNIT', gen('CurrentUnit'))
+
+        put('HW_COUNTER_PIXEL_SIZE', section_text('HWConfigurations/Detector', 'PixelSize'))
+
+        for tag, key in (('AxisName', 'MEAS_SCAN_AXIS_X'), ('Mode', 'MEAS_SCAN_MODE'),
+                         ('Start', 'MEAS_SCAN_START'), ('Stop', 'MEAS_SCAN_STOP'),
+                         ('Step', 'MEAS_SCAN_STEP'), ('Speed', 'MEAS_SCAN_SPEED'),
+                         ('SpeedUnit', 'MEAS_SCAN_SPEED_UNIT'),
+                         ('Resolution', 'MEAS_SCAN_RESOLUTION_X'),
+                         ('PositionUnit', 'MEAS_SCAN_UNIT_X'),
+                         ('IntensityUnit', 'MEAS_SCAN_UNIT_Y'),
+                         ('DataCount', 'MEAS_DATA_COUNT')):
+            put(key, section_text('ScanInformation', tag))
+
+        for tag, key in (('StartTime', 'MEAS_SCAN_START_TIME'), ('EndTime', 'MEAS_SCAN_END_TIME')):
+            # '2022-06-07T13:12:13Z' -> a value datetime.fromisoformat() accepts
+            put(key, section_text('ScanInformation', tag).rstrip('Z'))
+
+        # The Nth <Axis> element lines up with the *MEAS_COND_AXIS_*-N index
+        # used by .ras headers, which is how the key parameters table finds the
+        # DS / SS / RS slits.
+        axes = root.find('Axes')
+        if axes is not None:
+            for index, axis in enumerate(axes.findall('Axis')):
+                for attribute, prefix in (('Position', 'MEAS_COND_AXIS_POSITION'),
+                                          ('Offset', 'MEAS_COND_AXIS_OFFSET'),
+                                          ('Unit', 'MEAS_COND_AXIS_UNIT'),
+                                          ('State', 'MEAS_COND_AXIS_STATE'),
+                                          ('Resolution', 'MEAS_COND_AXIS_RESOLUTION')):
+                    put(f'{prefix}-{index}', axis.attrib.get(attribute, ''))
+                if not metadata.get(f'MEAS_COND_AXIS_NAME-{index}'):
+                    put(f'MEAS_COND_AXIS_NAME-{index}', axis.attrib.get('Name', ''))
+
+        return metadata
+
+    def _parse_rasx_profile(profile_text):
+        """Profile*.txt holds tab-separated angle / intensity / attenuator rows."""
+        rows = []
+        for line in profile_text.splitlines():
+            line = line.strip()
+            if not line or line.startswith('#') or line.startswith('*'):
+                continue
+            parts = line.replace(',', ' ').split()
+            if len(parts) < 2:
+                continue
+            try:
+                angle = float(parts[0])
+                intensity = float(parts[1])
+            except ValueError:
+                continue
+            # Third column is the attenuator factor the intensity was measured
+            # through; the true count rate is the product of the two.
+            if len(parts) >= 3:
+                try:
+                    intensity *= float(parts[2])
+                except ValueError:
+                    pass
+            rows.append([angle, intensity])
+
+        if not rows:
+            return None
+        return pd.DataFrame(rows, columns=['2Theta', 'Intensity'])
+
     def parse_rasx(uploaded_file_object):
+        """Parse a Rigaku SmartLab .rasx file.
+
+        A .rasx is a ZIP archive: root.xml lists one Data<N> group per scan and
+        each group holds a Profile<N>.txt with the measured points plus a
+        MesurementConditions<N>.xml with the instrument settings.
+        """
         try:
-            full_metadata = {}
-            data_df = None
+            uploaded_file_object.seek(0)
             with zipfile.ZipFile(uploaded_file_object, 'r') as zf:
-                xml_filename = next((f for f in zf.namelist() if f.lower().endswith('.xml')), None)
-                if not xml_filename:
-                    st.error("No XML metadata file found in the RASX archive.")
+                names = zf.namelist()
+
+                def pick(predicate):
+                    return next(iter(sorted(f for f in names if predicate(f.lower()))), None)
+
+                conditions_name = (
+                    pick(lambda n: 'conditions' in n and n.endswith('.xml'))
+                    or pick(lambda n: n.endswith('.xml') and not n.endswith('root.xml'))
+                )
+                full_metadata = {}
+                if conditions_name:
+                    root = ET.fromstring(_decode_rasx_text(zf.read(conditions_name)))
+                    full_metadata = _rasx_metadata_from_conditions(root)
+
+                profile_name = (
+                    pick(lambda n: 'profile' in n and n.endswith('.txt'))
+                    or pick(lambda n: n.endswith('.asc'))
+                    or pick(lambda n: n.endswith('.txt'))
+                )
+                if not profile_name:
+                    st.error("No profile data (Profile*.txt) found in the RASX archive.")
                     return None, None, None
 
-                xml_bytes = zf.read(xml_filename)
-                xml_content_str = xml_bytes.decode('shift_jis', errors='replace')
-                root = ET.fromstring(xml_content_str)
+                data_df = _parse_rasx_profile(_decode_rasx_text(zf.read(profile_name)))
 
-                for param in root.iter('Parameter'):
-                    if 'name' in param.attrib and 'value' in param.attrib:
-                        full_metadata[param.attrib['name']] = param.attrib['value']
-
-                bin_filename = next((f for f in zf.namelist() if f.lower().endswith('.bin')), None)
-                asc_filename = next((f for f in zf.namelist() if f.lower().endswith('.asc')), None)
-
-                if bin_filename:
-                    binary_content = zf.read(bin_filename)
-                    intensities = np.frombuffer(binary_content, dtype=np.float32)
-                    num_points = len(intensities)
-                    start_angle = float(full_metadata.get('Start', 0))
-                    stop_angle = float(full_metadata.get('Stop', 90))
-                    angles = np.linspace(start_angle, stop_angle, num_points)
-                    data_df = pd.DataFrame({'2Theta': angles, 'Intensity': intensities})
-                elif asc_filename:
-                    asc_content = zf.read(asc_filename).decode('utf-8', errors='replace')
-                    data_df = parse_xy(asc_content)
-                else:
-                    st.error("No data file (.bin or .asc) found in the RASX archive.")
-                    return None, None, None
+            if data_df is None or data_df.empty:
+                st.error("No data points found in the RASX file.")
+                return None, None, None
 
             key_metadata = extract_key_ras_metadata(full_metadata)
             return full_metadata, key_metadata, data_df
@@ -1422,7 +1555,7 @@ def run_data_converter():
             }
         return pd.DataFrame(list(metadata.items()), columns=['Parameter', 'Value'])
 
-    st.markdown("### 📜 XRD File Format Converter (.xrdml, .ras, .raw, .xy)")
+    st.markdown("### 📜 XRD File Format Converter (.xrdml, .ras, .rasx, .raw, .xy)")
     with st.expander(f"How to **Cite**", icon="📚", expanded=False):
         st.markdown("""
         If you like the app, please cite the following source:
@@ -1438,7 +1571,7 @@ def run_data_converter():
     #)
     st.info(
         "📄🔁📄 Upload one or more data powder diffraction files to convert them to a different format. .**xy ➡️ .xrdml, .ras, .raw**. "
-        "Or **.xrdml, .ras, .raw ➡️ .xy**. \n\n ℹ️ For **.raw** (Bruker) files, please check that the converted "
+        "Or **.xrdml, .ras, .rasx, .raw ➡️ .xy**. \n\n ℹ️ For **.raw** (Bruker) files, please check that the converted "
         "axis values are reasonable. \n\n **Batch mode** is automatically activated when multiple files are uploaded.")
 
     # The uploader key holds a counter. Incrementing it (in the clear button
@@ -1451,7 +1584,7 @@ def run_data_converter():
         st.session_state.uploader_key += 1
 
     uploaded_files_raw = st.file_uploader("Upload Data File(s)",
-                                          type=["xrdml", "xml", "ras", "xy", "dat", "txt", "raw", "csv"],
+                                          type=["xrdml", "xml", "ras", "rasx", "xy", "dat", "txt", "raw", "csv"],
                                           accept_multiple_files=True,
                                           key=f"file_uploader_{st.session_state.uploader_key}")
 
@@ -1758,34 +1891,34 @@ def _logo_data_uri(relative_path):
 
 
 def display_conversion_visual():
-    col_visual, col_ad = st.columns([1, 2.6])
+    col_visual, col_ad = st.columns([1, 1.6])
 
     with col_visual:
         st.markdown("""
-        <div style="margin: 25px 0; text-align: center; padding: 16px 12px; background: linear-gradient(135deg, #f8f9ff 0%, #e8f4fd 100%); border-radius: 14px; box-shadow: 0 4px 12px rgba(0,0,0,0.08);">
-            <div style="display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: nowrap;">
+        <div style="margin: 25px 0; text-align: center; padding: 28px 16px; background: linear-gradient(135deg, #f8f9ff 0%, #e8f4fd 100%); border-radius: 14px; box-shadow: 0 4px 12px rgba(0,0,0,0.08);">
+            <div style="display: flex; align-items: center; justify-content: center; gap: 14px; flex-wrap: nowrap;">
                 <div style="display: flex; flex-direction: column; align-items: center;">
-                    <div style="background: linear-gradient(135deg, #74b9ff, #0984e3); color: white; padding: 8px 10px; border-radius: 9px; box-shadow: 0 3px 9px rgba(116, 185, 255, 0.4); margin: 4px; min-width: 72px; text-align: center;">
-                        <div style="font-size: 0.85em; font-weight: bold; margin-bottom: 2px;">.xy</div>
-                        <div style="font-size: 0.6em; opacity: 0.9;">Generic XY Data</div>
+                    <div style="background: linear-gradient(135deg, #74b9ff, #0984e3); color: white; padding: 14px 14px; border-radius: 9px; box-shadow: 0 3px 9px rgba(116, 185, 255, 0.4); margin: 4px; min-width: 104px; text-align: center;">
+                        <div style="font-size: 1.15em; font-weight: bold; margin-bottom: 4px;">.xy</div>
+                        <div style="font-size: 0.8em; opacity: 0.9;">Generic XY Data</div>
                     </div>
                 </div>
                 <div style="display: flex; flex-direction: column; align-items: center;">
-                    <div style="font-size: 1.3em; color: #6c5ce7; line-height: 1.1;">→</div>
-                    <div style="font-size: 1.3em; color: #6c5ce7; line-height: 1.1;">←</div>
+                    <div style="font-size: 1.8em; color: #6c5ce7; line-height: 1.15;">→</div>
+                    <div style="font-size: 1.8em; color: #6c5ce7; line-height: 1.15;">←</div>
                 </div>
                 <div style="display: flex; flex-direction: column; align-items: center;">
-                    <div style="background: linear-gradient(135deg, #74b9ff, #0984e3); color: white; padding: 6px 10px; border-radius: 8px; box-shadow: 0 3px 8px rgba(116, 185, 255, 0.4); margin: 3px; min-width: 82px; text-align: center;">
-                        <div style="font-size: 0.8em; font-weight: bold;">.xrdml</div>
-                        <div style="font-size: 0.58em; opacity: 0.9;">PANalytical XML</div>
+                    <div style="background: linear-gradient(135deg, #74b9ff, #0984e3); color: white; padding: 11px 14px; border-radius: 8px; box-shadow: 0 3px 8px rgba(116, 185, 255, 0.4); margin: 6px; min-width: 168px; text-align: center;">
+                        <div style="font-size: 1.1em; font-weight: bold;">.xrdml</div>
+                        <div style="font-size: 0.8em; opacity: 0.9;">PANalytical XML</div>
                     </div>
-                    <div style="background: linear-gradient(135deg, #74b9ff, #0984e3); color: white; padding: 6px 10px; border-radius: 8px; box-shadow: 0 3px 8px rgba(116, 185, 255, 0.4); margin: 3px; min-width: 82px; text-align: center;">
-                        <div style="font-size: 0.8em; font-weight: bold;">.ras</div>
-                        <div style="font-size: 0.58em; opacity: 0.9;">Rigaku ASCII</div>
+                    <div style="background: linear-gradient(135deg, #74b9ff, #0984e3); color: white; padding: 11px 14px; border-radius: 8px; box-shadow: 0 3px 8px rgba(116, 185, 255, 0.4); margin: 6px; min-width: 168px; text-align: center;">
+                        <div style="font-size: 1.1em; font-weight: bold;">.ras / .rasx</div>
+                        <div style="font-size: 0.8em; opacity: 0.9;">Rigaku ASCII / SmartLab</div>
                     </div>
-                    <div style="background: linear-gradient(135deg, #74b9ff, #0984e3); color: white; padding: 6px 10px; border-radius: 8px; box-shadow: 0 3px 8px rgba(116, 185, 255, 0.4); margin: 3px; min-width: 82px; text-align: center;">
-                        <div style="font-size: 0.8em; font-weight: bold;">.raw</div>
-                        <div style="font-size: 0.58em; opacity: 0.9;">Bruker Binary</div>
+                    <div style="background: linear-gradient(135deg, #74b9ff, #0984e3); color: white; padding: 11px 14px; border-radius: 8px; box-shadow: 0 3px 8px rgba(116, 185, 255, 0.4); margin: 6px; min-width: 168px; text-align: center;">
+                        <div style="font-size: 1.1em; font-weight: bold;">.raw</div>
+                        <div style="font-size: 0.8em; opacity: 0.9;">Bruker Binary</div>
                     </div>
                 </div>
             </div>
@@ -1927,7 +2060,7 @@ if __name__ == "__main__":
     st.markdown(css, unsafe_allow_html=True)
 
     st.sidebar.title("XRD Converter Tools")
-    st.sidebar.caption("**v0.5.1** — 2026-07-28")
+    st.sidebar.caption("**v0.5.2** — 2026-08-04")
     st.sidebar.info(
         "Visit also main app here: **[XRDlicious](https://xrdlicious.com)**. 🌀 Developed by **[IMPLANT team](https://implant.fs.cvut.cz/)**. "
         "**[Tutorial here](https://youtu.be/KwxVKadPZ6s?si=S1_67xF5J3sI7n69)**. Spot a bug or have a feature idea? Let us know at: "
