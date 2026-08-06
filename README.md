@@ -5,7 +5,7 @@ Online tool for converting X-ray diffraction data files between formats (.xrdml,
 🌐 Access the app here: https://xrd-convert.streamlit.app/  
 
 🎥 Tutorial at [**YouTube**](https://youtu.be/KwxVKadPZ6s?si=4kzdKA_AnEpbnUwl).   
-📖 If you like this application, **please cite**: [Lebeda, Miroslav, et al. XRDlicious: an interactive web-based platform for online calculation of diffraction patterns and radial distribution functions from crystal structures. Applied Crystallography, 2025, 58.5.](https://journals.iucr.org/j/issues/2025/05/00/hat5006/index.html)  
+📖 If you like this application, **please cite**: [Lebeda, Miroslav, et al. XRDlicious: an interactive web-based platform for online calculation of diffraction patterns and radial distribution functions from crystal structures. Journal of Applied Crystallography, 2025, 58.5.](https://journals.iucr.org/j/issues/2025/05/00/hat5006/index.html)  
 
 
 

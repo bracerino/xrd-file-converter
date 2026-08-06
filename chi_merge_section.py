@@ -217,7 +217,7 @@ def run_chi_merge_section():
     with st.expander("How to **Cite**", icon="📚", expanded=False):
         st.markdown("""
         If you like the app, please cite the following source:
-        - **XRDlicious, 2025** – [Lebeda, Miroslav, et al. XRDlicious: an interactive web-based platform for online calculation of diffraction patterns and radial distribution functions from crystal structures. Applied Crystallography, 2025, 58.5.](https://doi.org/10.1107/S1600576725005370).
+        - **XRDlicious, 2025** – [Lebeda, Miroslav, et al. XRDlicious: an interactive web-based platform for online calculation of diffraction patterns and radial distribution functions from crystal structures. Journal of Applied Crystallography, 2025, 58.5.](https://doi.org/10.1107/S1600576725005370).
         """)
     st.info(
         "Merge two-column **.xy** patterns (`X  Intensity`) across all scans. "
