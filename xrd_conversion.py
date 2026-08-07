@@ -5,7 +5,13 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objs as go
 from io import StringIO, BytesIO
+from datetime import datetime
 import zipfile
+
+
+def timestamp_suffix():
+    """Current local date and time, formatted for use inside a file name."""
+    return datetime.now().strftime("%Y-%m-%d_%H-%M")
 
 
 BG_METHODS = [
@@ -800,7 +806,7 @@ def run_axis_converter():
                     st.download_button(
                         label="⬇️ Download ZIP",
                         data=zip_buffer.getvalue(),
-                        file_name="converted_xrd_files.zip",
+                        file_name=f"converted_xrd_files_{timestamp_suffix()}.zip",
                         mime="application/zip",
                         type = "primary",
                         width='stretch'

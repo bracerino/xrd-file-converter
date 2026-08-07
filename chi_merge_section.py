@@ -23,6 +23,8 @@ from scipy.ndimage import (
     uniform_filter1d,
 )
 
+from xrd_conversion import timestamp_suffix
+
 
 FONT_SIZE   = 24
 HOVER_FONT  = 22
@@ -497,7 +499,7 @@ def run_chi_merge_section():
         st.download_button(
             "📦 Download ZIP (all outputs)",
             data=zip_bytes,
-            file_name=f"{base_name}_merge_outputs.zip",
+            file_name=f"{base_name}_merge_outputs_{timestamp_suffix()}.zip",
             mime="application/zip",
             type="primary",
         )

@@ -10,6 +10,8 @@ from scipy.signal import savgol_filter as _savgol
 from scipy.sparse import diags as _sp_diags
 from scipy.sparse.linalg import spsolve as _spsolve
 
+from xrd_conversion import timestamp_suffix
+
 
 FONT_SIZE  = 18
 HOVER_FONT = 17
@@ -899,7 +901,7 @@ def run_chi_scan_section():
             st.download_button(
                 label=f"⬇️ Download ZIP  ({n_chi} files)",
                 data=zip_bytes,
-                file_name=f"{base_name}_chi_scans.zip",
+                file_name=f"{base_name}_chi_scans_{timestamp_suffix()}.zip",
                 mime="application/zip",
                 type="primary",
             )

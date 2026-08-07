@@ -1,5 +1,5 @@
 # XRD File Format Converter
-Online tool for converting X-ray diffraction data files between formats (.xrdml, .ras, .raw, .xy) and between different X/Y axis (different wavelengths, d-spacing, q-spacing, automatic - divergence slits), and for merging/averaging multiple .xy XRD data into a single pattern.
+Online tool for converting X-ray diffraction data files between formats (.xrdml, .ras, .raw, .xy) and between different X/Y axis (different wavelengths, d-spacing, q-spacing, automatic - divergence slits), for merging/averaging multiple .xy XRD data into a single pattern, and for interactively plotting and stacking multiple measured patterns.
 
 🔬 Submodule of **[XRDlicious](https://github.com/bracerino/xrdlicious)**.  
 🌐 Access the app here: https://xrd-convert.streamlit.app/  
