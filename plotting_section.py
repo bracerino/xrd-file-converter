@@ -316,8 +316,6 @@ def run_plotting_section():
         log_y = st.toggle("Logarithmic Y-axis", key=f"plot_logy_{signature}")
         log_x = st.toggle("Logarithmic X-axis", key=f"plot_logx_{signature}")
 
-    plot_placeholder = st.empty()
-
     # ── Per-curve appearance (sidebar, under the tool selector) ──────────
     st.sidebar.markdown("---")
     st.sidebar.markdown("### 📈 Plotting settings")
@@ -526,10 +524,23 @@ def run_plotting_section():
         template="plotly_white",
     )
 
-    with plot_placeholder.container():
+    # The chart is drawn straight into a keyed container that reserves its own
+    # height. If the tall chart were removed from the page while a rerun is in
+    # flight (as happens with an st.empty() placeholder), the page would briefly
+    # get shorter and the browser would scroll back up on every slider move.
+    st.markdown(
+        f"""
+        <style>
+        .st-key-xrd_plot_container {{ min-height: {plot_height + 60}px; }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    with st.container(key="xrd_plot_container"):
         st.plotly_chart(
             figure,
             width='stretch',
+            key="xrd_plot_chart",
             config={
                 "displaylogo": False,
                 "scrollZoom": True,
