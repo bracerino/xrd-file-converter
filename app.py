@@ -13,8 +13,65 @@ from xrd_conversion import run_axis_converter, convert_xaxis_data, get_axis_labe
 from chi_scan_section import run_chi_scan_section
 from chi_merge_section import run_chi_merge_section
 from plotting_section import run_plotting_section
-from xrd_parsers import (extract_key_ras_metadata, parse_xrdml, parse_ras,
-                         parse_rasx, parse_raw, parse_xy)
+from download_log import log_download
+from xrd_parsers import (extract_key_ras_metadata, metadata_dataframe,
+                         parse_xrdml, parse_ras, parse_rasx, parse_raw,
+                         parse_xy)
+
+
+# Characteristic wavelengths (Kα1, Kα2, Kβ) in Å of the usual laboratory
+# anodes, so that a .xy file — which carries no instrument information at all —
+# can be converted with a realistic header without typing four numbers.
+ANODE_PRESETS = {
+    "Cu": (1.540598, 1.544426, 1.392250),
+    "Co": (1.788996, 1.792835, 1.620790),
+    "Mo": (0.709319, 0.713609, 0.632305),
+    "Cr": (2.289760, 2.293651, 2.084870),
+    "Fe": (1.936042, 1.939980, 1.756610),
+    "Ag": (0.559422, 0.563813, 0.497069),
+}
+
+# Which rows of the metadata table hold that information, per output format.
+# A .ras file names only the target — the Rigaku software derives the
+# wavelengths from it — so it has no wavelength rows to fill.
+ANODE_ROWS = {
+    "RAS": {"anode": "HW_XG_TARGET_NAME"},
+    "RAW": {"anode": "X-ray Target",
+            "ka1": "K-Alpha1 (Å)",
+            "ka2": "K-Alpha2 (Å)",
+            "kb": "K-Beta (Å)"},
+    "XRDML": {"anode": "Anode Material",
+              "ka1": "K-Alpha1 Wavelength (Å)",
+              "ka2": "K-Alpha2 Wavelength (Å)",
+              "kb": "K-Beta Wavelength (Å)"},
+}
+
+
+def apply_anode_preset(meta_df, output_format, anode):
+    """Metadata table with the anode / wavelength rows set to the preset.
+
+    Only the rows that the chosen output format actually knows are touched;
+    everything the user has edited otherwise is kept. A row that is missing
+    (the table is editable, so it can be deleted) is appended again.
+    """
+    ka1, ka2, kb = ANODE_PRESETS[anode]
+    rows = ANODE_ROWS.get(output_format, {})
+    values = {
+        rows.get("anode"): anode,
+        rows.get("ka1"): f"{ka1:.5f}",
+        rows.get("ka2"): f"{ka2:.5f}",
+        rows.get("kb"): f"{kb:.5f}",
+    }
+    values.pop(None, None)
+
+    df = meta_df.copy()
+    for parameter, value in values.items():
+        mask = df["Parameter"] == parameter
+        if mask.any():
+            df.loc[mask, "Value"] = value
+        else:
+            df.loc[len(df)] = [parameter, value]
+    return df.reset_index(drop=True)
 
 
 def run_data_converter():
@@ -997,7 +1054,7 @@ def run_data_converter():
                 'Common Counting Time (s)': '1.0', 'X-ray Tube Tension (kV)': '45',
                 'X-ray Tube Current (mA)': '40', 'Anode Material': 'Cu',
             }
-        return pd.DataFrame(list(metadata.items()), columns=['Parameter', 'Value'])
+        return metadata_dataframe(metadata)
 
     st.markdown("### 📜 XRD File Format Converter (.xrdml, .ras, .rasx, .raw, .xy)")
     with st.expander(f"How to **Cite**", icon="📚", expanded=False):
@@ -1146,11 +1203,11 @@ def run_data_converter():
                 col1, col2 = st.columns([1, 1.5])
                 with col1:
                     st.markdown(f"#### 📝 Key Parameters (from `{first_file.name}`)")
-                    st.table(pd.DataFrame(list(key_metadata.items()), columns=['Parameter', 'Value']))
+                    st.table(metadata_dataframe(key_metadata))
 
                     if full_metadata and file_ext in ['ras', 'rasx']:
                         with st.expander("Show Full Raw Header"):
-                            st.dataframe(pd.DataFrame(list(full_metadata.items()), columns=['Parameter', 'Value']),
+                            st.dataframe(metadata_dataframe(full_metadata),
                                          height=300)
 
                     include_header = st.checkbox("Include header in .xy file", value=False)
@@ -1183,14 +1240,18 @@ def run_data_converter():
                                 data=zip_buffer.getvalue(),
                                 file_name=f"converted_xy_files_{timestamp_suffix()}.zip",
                                 mime="application/zip",
-                                width='stretch'
+                                width='stretch',
+                                on_click=log_download,
+                                args=("File Format Converter",),
                             )
                     else:
                         default_name = first_file.name.rsplit('.', 1)[0] + '.xy'
                         download_filename = st.text_input("Enter filename for download:", default_name)
                         xy_data = convert_to_xy(data_df, include_header)
                         st.download_button("⬇️ Download as .xy File", xy_data, download_filename, "text/plain",
-                                           type="primary", width='stretch')
+                                           type="primary", width='stretch',
+                                           on_click=log_download,
+                                           args=("File Format Converter",))
 
                 with col2:
                     st.markdown("#### 📈 Diffraction Pattern")
@@ -1218,7 +1279,23 @@ def run_data_converter():
                     st.markdown("#### 📝 Edit Details for Output File(s)")
                     if is_batch:
                         st.info(f"These settings will be applied to all **{len(uploaded_files)} files**.")
-                    output_format = st.selectbox("Select Output Format", ['XRDML', 'RAS', 'RAW'])
+                    fmt_col, anode_col = st.columns(2)
+                    with fmt_col:
+                        output_format = st.selectbox("Select Output Format", ['XRDML', 'RAS', 'RAW'])
+                    with anode_col:
+                        # A .xy file has no instrument information, so the anode
+                        # is offered as a one-click setting instead of four
+                        # values typed into the table below.
+                        anode_choice = st.selectbox(
+                            "Quick setting: X-ray source",
+                            list(ANODE_PRESETS),
+                            key="anode_quick_choice",
+                            help="Fills the anode and wavelength rows of the "
+                                 "table below with the characteristic values of "
+                                 "the chosen tube — only the rows the selected "
+                                 "output format knows (a .ras file stores the "
+                                 "target name only).",
+                        )
 
                     # Metadata settings apply to all uploaded files, so key the
                     # table state by output format only (not the previewed file)
@@ -1233,8 +1310,29 @@ def run_data_converter():
                         st.session_state[applied_key] = False
                         st.session_state['last_file_format_choice'] = output_format
 
-                    edited_df = st.data_editor(st.session_state[df_state_key], num_rows="dynamic", height=425,
-                                               key=f"editor_{output_format}")
+                    # The preset is written into the table whenever the choice
+                    # changes, and again after a format switch (it is tracked per
+                    # format), so the rows of the newly selected format are filled
+                    # as well.
+                    anode_state_key = f"meta_anode_{output_format}"
+                    editor_ver_key = f"meta_editor_ver_{output_format}"
+                    if (anode_choice in ANODE_PRESETS
+                            and st.session_state.get(anode_state_key) != anode_choice):
+                        st.session_state[df_state_key] = apply_anode_preset(
+                            st.session_state[df_state_key], output_format, anode_choice)
+                        st.session_state[anode_state_key] = anode_choice
+                        st.session_state[applied_key] = False
+                        # The editor keeps its own copy of the edits, so it is
+                        # rebuilt under a new key to show the filled-in values.
+                        st.session_state[editor_ver_key] = int(
+                            st.session_state.get(editor_ver_key, 0)) + 1
+
+                    st.caption("✏️ All values in the table below can be edited.")
+
+                    edited_df = st.data_editor(
+                        st.session_state[df_state_key], num_rows="dynamic", height=425,
+                        key=f"editor_{output_format}_v"
+                            f"{st.session_state.get(editor_ver_key, 0)}")
 
                     if st.button("Apply Changes & Prepare Download", type="primary", width='stretch'):
                         st.session_state[df_state_key] = edited_df
@@ -1272,7 +1370,9 @@ def run_data_converter():
                                 file_name=f"converted_to_{output_format}_{timestamp_suffix()}.zip",
                                 mime="application/zip",
                                 type="primary",
-                                width='stretch'
+                                width='stretch',
+                                on_click=log_download,
+                                args=("File Format Converter",),
                             )
                         else:
                             default_name = first_file.name.rsplit('.', 1)[0] + f'.{file_extension}'
@@ -1297,7 +1397,9 @@ def run_data_converter():
                                     file_name=download_filename,
                                     mime=mime_type,
                                     type="primary",
-                                    width='stretch'
+                                    width='stretch',
+                                    on_click=log_download,
+                                    args=("File Format Converter",),
                                 )
 
                 with col2:
@@ -1539,7 +1641,7 @@ if __name__ == "__main__":
     st.markdown(css, unsafe_allow_html=True)
 
     st.sidebar.title("XRD Converter Tools")
-    st.sidebar.caption("**v0.6.0** — 2026-08-07")
+    st.sidebar.caption("**v0.6.1** — 2026-08-17")
     st.sidebar.info(
         "Visit also main app here: **[XRDlicious](https://xrdlicious.com)**. 🌀 Developed by **[IMPLANT team](https://implant.fs.cvut.cz/)**. "
         "**[Tutorial here](https://youtu.be/KwxVKadPZ6s?si=S1_67xF5J3sI7n69)**. Spot a bug or have a feature idea? Let us know at: "

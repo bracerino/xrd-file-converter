@@ -8,9 +8,7 @@ the per-2theta maximum across tilts keeps each crystallite's full peak intensity
 Exposed as ``run_chi_merge_section()`` for the Streamlit app.
 """
 
-import io
 import re
-import zipfile
 
 import numpy as np
 import pandas as pd
@@ -23,7 +21,7 @@ from scipy.ndimage import (
     uniform_filter1d,
 )
 
-from xrd_conversion import timestamp_suffix
+from download_log import log_download
 
 
 FONT_SIZE   = 24
@@ -193,22 +191,21 @@ def _xy_text(x, y, header):
     return f"# {header}\n{body}\n"
 
 
-def _make_zip(x, variants, peaks_tt, peaks_int, base_name):
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr(f"{base_name}_merged_maxproj.xy",
-                    _xy_text(x, variants["maxproj"], "2Theta  Intensity (max projection)"))
-        zf.writestr(f"{base_name}_merged_p95.xy",
-                    _xy_text(x, variants["p95"], "2Theta  Intensity (95th percentile)"))
-        zf.writestr(f"{base_name}_merged_bgmax.xy",
-                    _xy_text(x, variants["bg_max"], "2Theta  Intensity (background-subtracted max)"))
-        zf.writestr(f"{base_name}_merged_average.xy",
-                    _xy_text(x, variants["average"], "2Theta  Intensity (average, reference only)"))
-        peak_body = "# 2Theta  Intensity\n" + "\n".join(
-            f"{t:.6f}  {i:.4f}" for t, i in zip(peaks_tt, peaks_int))
-        zf.writestr(f"{base_name}_peaks.txt", peak_body + "\n")
-    buf.seek(0)
-    return buf.getvalue()
+# File-name tag and header line of each merge method, used by the download
+# buttons so a saved file says which merge it came from.
+MERGE_FILE_TAGS = {
+    "maxproj": "maxproj",
+    "p95": "p95",
+    "bg_max": "bgmax",
+    "average": "average",
+}
+
+MERGE_FILE_HEADERS = {
+    "maxproj": "2Theta  Intensity (max projection)",
+    "p95": "2Theta  Intensity (95th percentile)",
+    "bg_max": "2Theta  Intensity (background-subtracted max)",
+    "average": "2Theta  Intensity (average, reference only)",
+}
 
 
 # --------------------------------------------------------------------------- #
@@ -469,21 +466,25 @@ def run_chi_merge_section():
 
     with tab_dl:
         st.markdown("#### Download merged data")
-        d1, d2 = st.columns(2)
-        d1.download_button(
-            "💾 Merged (max projection) .xy",
-            data=_xy_text(x, variants["maxproj"], "2Theta  Intensity (max projection)"),
-            file_name=f"{base_name}_merged_maxproj.xy",
-            mime="text/plain",
-            type="primary",
-        )
-        d2.download_button(
-            "💾 Background-subtracted max .xy",
-            data=_xy_text(x, variants["bg_max"], "2Theta  Intensity (background-subtracted max)"),
-            file_name=f"{base_name}_merged_bgmax.xy",
-            mime="text/plain",
-        )
+        st.caption("Every merge method shown in the plots can be saved on its "
+                   "own — the file carries the method in its name and header.")
+        # Driven by method_map, so the buttons always match the methods that
+        # are actually offered on the '🔬 Merge methods' tab.
+        dl_cols = st.columns(2)
+        for _i, (_label, (_key, _color)) in enumerate(method_map.items()):
+            dl_cols[_i % 2].download_button(
+                f"💾 {_label} .xy",
+                data=_xy_text(x, variants[_key], MERGE_FILE_HEADERS[_key]),
+                file_name=f"{base_name}_merged_{MERGE_FILE_TAGS[_key]}.xy",
+                mime="text/plain",
+                key=f"dl_merge_{_key}",
+                type="primary" if _key == "maxproj" else "secondary",
+                width="stretch",
+                on_click=log_download,
+                args=(f"Multiple .xy merge ({_label})",),
+            )
 
+        st.markdown("---")
         peak_body = "# 2Theta  Intensity\n" + "\n".join(
             f"{t:.6f}  {i:.4f}" for t, i in zip(peaks_tt, peaks_int))
         st.download_button(
@@ -491,17 +492,8 @@ def run_chi_merge_section():
             data=peak_body + "\n",
             file_name=f"{base_name}_peaks.txt",
             mime="text/plain",
-        )
-
-        st.markdown("---")
-        st.markdown("**Full archive** — all variants + peak list")
-        zip_bytes = _make_zip(x, variants, peaks_tt, peaks_int, base_name)
-        st.download_button(
-            "📦 Download ZIP (all outputs)",
-            data=zip_bytes,
-            file_name=f"{base_name}_merge_outputs_{timestamp_suffix()}.zip",
-            mime="application/zip",
-            type="primary",
+            on_click=log_download,
+            args=("Multiple .xy merge (peak list)",),
         )
 
 

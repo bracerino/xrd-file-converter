@@ -16,6 +16,7 @@ import pandas as pd
 import plotly.graph_objs as go
 import streamlit as st
 
+from download_log import log_download
 from xrd_conversion import timestamp_suffix
 from xrd_parsers import parse_xrdml, parse_ras, parse_rasx, parse_raw
 
@@ -592,6 +593,8 @@ def run_plotting_section():
             file_name=f"plotted_data_{timestamp_suffix()}.zip",
             mime="application/zip",
             width='stretch',
+            on_click=log_download,
+            args=("Plotting",),
         )
 
     # The self-contained HTML embeds plotly.js (~5 MB), so it is only built on
@@ -616,6 +619,8 @@ def run_plotting_section():
                 mime="text/html",
                 width='stretch',
                 help="A self-contained web page — the plot stays zoomable, no internet needed.",
+                on_click=log_download,
+                args=("Plotting",),
             )
         elif st.button("🌐 Prepare interactive plot (.html)", width='stretch',
                        help="Builds a self-contained, zoomable web page of the plot above."):

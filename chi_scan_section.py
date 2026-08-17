@@ -11,6 +11,7 @@ from scipy.sparse import diags as _sp_diags
 from scipy.sparse.linalg import spsolve as _spsolve
 
 from xrd_conversion import timestamp_suffix
+from xrd_parsers import metadata_dataframe
 
 
 FONT_SIZE  = 18
@@ -608,7 +609,7 @@ def run_chi_scan_section():
 
     with st.expander("📋 File metadata", expanded=False):
         if metadata:
-            meta_df = pd.DataFrame(list(metadata.items()), columns=["Parameter", "Value"])
+            meta_df = metadata_dataframe(metadata)
             st.dataframe(meta_df, width='stretch', hide_index=True)
         else:
             st.info("No metadata found.")

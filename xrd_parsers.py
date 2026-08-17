@@ -16,6 +16,26 @@ import pandas as pd
 import streamlit as st
 
 
+def metadata_dataframe(metadata, columns=("Parameter", "Value")):
+    """Two-column table of a metadata dict, with every value rendered as text.
+
+    Metadata dicts mix strings with numbers ('Number of Points' is an int, for
+    instance), so the value column ends up as an object column that Arrow
+    cannot convert. Streamlit then dumps a full pyarrow traceback into the
+    console for every such table before falling back to its own conversion.
+    Text everywhere keeps the console clean and looks the same on screen.
+    """
+    rows = [(str(key), _metadata_text(value))
+            for key, value in metadata.items()]
+    return pd.DataFrame(rows, columns=list(columns))
+
+
+def _metadata_text(value):
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace").strip()
+    return str(value)
+
+
 def extract_key_ras_metadata(metadata_dict):
     key_metadata = {
         'X-ray Target': metadata_dict.get('HW_XG_TARGET_NAME', 'N/A'),

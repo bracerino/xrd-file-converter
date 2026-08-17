@@ -8,6 +8,8 @@ from io import StringIO, BytesIO
 from datetime import datetime
 import zipfile
 
+from download_log import log_download
+
 
 def timestamp_suffix():
     """Current local date and time, formatted for use inside a file name."""
@@ -809,7 +811,9 @@ def run_axis_converter():
                         file_name=f"converted_xrd_files_{timestamp_suffix()}.zip",
                         mime="application/zip",
                         type = "primary",
-                        width='stretch'
+                        width='stretch',
+                        on_click=log_download,
+                        args=("X/Y-Axis Converter",),
                     )
             else:
                 default_name = first_file.name.rsplit('.', 1)[0] + '_converted.xy'
@@ -875,7 +879,9 @@ def run_axis_converter():
                     file_name=download_filename,
                     mime="text/plain",
                     type="primary",
-                    width='stretch'
+                    width='stretch',
+                    on_click=log_download,
+                    args=("X/Y-Axis Converter",),
                 )
 
     with col2:
