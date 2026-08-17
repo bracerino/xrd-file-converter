@@ -1547,7 +1547,8 @@ def display_ecm36_ad():
 
 
 if __name__ == "__main__":
-    st.set_page_config(layout="wide", page_title="XRD File Converter")
+    st.set_page_config(layout="wide", page_title="XRD File Converter",
+                       initial_sidebar_state="expanded")
     
     hide_streamlit_style = """
     <style>
