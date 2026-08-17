@@ -1457,6 +1457,41 @@ if __name__ == "__main__":
     [data-testid="stStatusWidget"] {display: none;}
     [data-testid="stSidebarCollapsedControl"] {visibility: visible !important; display: block !important;}
     [data-testid="collapsedControl"] {visibility: visible !important; display: block !important;}
+
+    /* The default open/close control is a thin chevron that is easy to miss
+       once the sidebar is hidden, so both buttons become a solid grey button
+       with a white icon. stExpandSidebarButton is the one shown over the page
+       while the sidebar is collapsed, stSidebarCollapseButton the one inside
+       the sidebar header. */
+    [data-testid="stExpandSidebarButton"],
+    [data-testid="stSidebarCollapseButton"] button {
+        background-color: #6b7280 !important;
+        color: #ffffff !important;
+        border: 1px solid #ffffff !important;
+        border-radius: 8px !important;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35) !important;
+        opacity: 1 !important;
+        transition: background-color 0.15s ease, transform 0.15s ease;
+    }
+    [data-testid="stExpandSidebarButton"]:hover,
+    [data-testid="stSidebarCollapseButton"] button:hover {
+        background-color: #4b5563 !important;
+        transform: scale(1.06);
+    }
+    /* Material icon fonts and inline SVGs both follow the button colour. */
+    [data-testid="stExpandSidebarButton"] *,
+    [data-testid="stSidebarCollapseButton"] button * {
+        color: #ffffff !important;
+        fill: #ffffff !important;
+    }
+    [data-testid="stExpandSidebarButton"] {
+        min-height: 34px !important;
+        min-width: 34px !important;
+        padding: 0 6px !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+    }
     </style>
     """
     st.markdown(hide_streamlit_style, unsafe_allow_html=True)
