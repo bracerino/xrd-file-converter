@@ -17,6 +17,7 @@ import plotly.graph_objs as go
 import streamlit as st
 
 from download_log import log_download
+from ui_style import apply_button_style
 from xrd_conversion import timestamp_suffix
 from xrd_parsers import parse_xrdml, parse_ras, parse_rasx, parse_raw
 
@@ -164,32 +165,7 @@ def _default_y_label(normalization, stacked):
 #  Main entry point
 # ──────────────────────────────────────────────────────────────────────────
 def run_plotting_section():
-    # Same button colours as the File Format Converter page.
-    st.markdown(
-        """
-        <style>
-        button[data-testid^="stBaseButton-primary"] {
-            background-color: #3b82f6; border-color: #3b82f6; color: #ffffff;
-        }
-        button[data-testid^="stBaseButton-primary"]:hover {
-            background-color: #2563eb; border-color: #2563eb; color: #ffffff;
-        }
-        [data-testid="stDownloadButton"] button {
-            background-color: #0e4d92; border-color: #0e4d92; color: #ffffff;
-        }
-        [data-testid="stDownloadButton"] button:hover {
-            background-color: #0a3a6e; border-color: #0a3a6e; color: #ffffff;
-        }
-        .st-key-remove_all_files_plot button[data-testid^="stBaseButton-primary"] {
-            background-color: #9ca3af; border-color: #9ca3af; color: #ffffff;
-        }
-        .st-key-remove_all_files_plot button[data-testid^="stBaseButton-primary"]:hover {
-            background-color: #868e96; border-color: #868e96; color: #ffffff;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
+    apply_button_style(["remove_all_files_plot"])
 
     st.info(
         "📈 Upload **one or more** diffraction patterns and compare them in one interactive plot. "

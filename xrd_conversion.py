@@ -1,6 +1,7 @@
 # xrd_axis_converter.py
 
 import streamlit as st
+from ui_style import apply_button_style
 import pandas as pd
 import numpy as np
 import plotly.graph_objs as go
@@ -404,49 +405,7 @@ def run_axis_converter():
         with hdr_col:
             st.markdown("#### ⚙️ Conversion Settings")
         with btn_col:
-            st.markdown(
-                """
-                <style>
-                /* Friendly blue for the primary action buttons
-                   (apply / prepare / download). */
-                button[data-testid^="stBaseButton-primary"] {
-                    background-color: #3b82f6;
-                    border-color: #3b82f6;
-                    color: #ffffff;
-                }
-                button[data-testid^="stBaseButton-primary"]:hover {
-                    background-color: #2563eb;
-                    border-color: #2563eb;
-                    color: #ffffff;
-                }
-                /* A deeper blue for the actual file-download buttons, to set
-                   them apart from the "prepare / apply" buttons. */
-                [data-testid="stDownloadButton"] button {
-                    background-color: #0e4d92;
-                    border-color: #0e4d92;
-                    color: #ffffff;
-                }
-                [data-testid="stDownloadButton"] button:hover {
-                    background-color: #0a3a6e;
-                    border-color: #0a3a6e;
-                    color: #ffffff;
-                }
-                /* Light gray for the "Remove all files" button (more
-                   specific, so it wins over the blue rule above). */
-                .st-key-remove_all_files_axis button[data-testid^="stBaseButton-primary"] {
-                    background-color: #9ca3af;
-                    border-color: #9ca3af;
-                    color: #ffffff;
-                }
-                .st-key-remove_all_files_axis button[data-testid^="stBaseButton-primary"]:hover {
-                    background-color: #868e96;
-                    border-color: #868e96;
-                    color: #ffffff;
-                }
-                </style>
-                """,
-                unsafe_allow_html=True,
-            )
+            apply_button_style(["remove_all_files_axis"])
             st.button("🗑️ Remove all files",
                       key="remove_all_files_axis",
                       on_click=_clear_axis_uploaded_files,

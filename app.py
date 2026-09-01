@@ -13,7 +13,9 @@ from xrd_conversion import run_axis_converter, convert_xaxis_data, get_axis_labe
 from chi_scan_section import run_chi_scan_section
 from chi_merge_section import run_chi_merge_section
 from plotting_section import run_plotting_section
+from image_digitizer_section import run_image_digitizer_section
 from download_log import log_download
+from ui_style import apply_button_style
 from xrd_parsers import (extract_key_ras_metadata, metadata_dataframe,
                          parse_xrdml, parse_ras, parse_rasx, parse_raw,
                          parse_xy)
@@ -1108,49 +1110,7 @@ def run_data_converter():
             else:
                 st.success(f"✅ Successfully uploaded **1** file (**.{first_file_ext}** format)")
         with clear_col:
-            st.markdown(
-                """
-                <style>
-                /* Friendly blue for the primary action buttons
-                   (apply / prepare / download). */
-                button[data-testid^="stBaseButton-primary"] {
-                    background-color: #3b82f6;
-                    border-color: #3b82f6;
-                    color: #ffffff;
-                }
-                button[data-testid^="stBaseButton-primary"]:hover {
-                    background-color: #2563eb;
-                    border-color: #2563eb;
-                    color: #ffffff;
-                }
-                /* A deeper blue for the actual file-download buttons, to set
-                   them apart from the "prepare / apply" buttons. */
-                [data-testid="stDownloadButton"] button {
-                    background-color: #0e4d92;
-                    border-color: #0e4d92;
-                    color: #ffffff;
-                }
-                [data-testid="stDownloadButton"] button:hover {
-                    background-color: #0a3a6e;
-                    border-color: #0a3a6e;
-                    color: #ffffff;
-                }
-                /* Light gray for the "Remove all files" button (more
-                   specific, so it wins over the blue rule above). */
-                .st-key-remove_all_files_format button[data-testid^="stBaseButton-primary"] {
-                    background-color: #9ca3af;
-                    border-color: #9ca3af;
-                    color: #ffffff;
-                }
-                .st-key-remove_all_files_format button[data-testid^="stBaseButton-primary"]:hover {
-                    background-color: #868e96;
-                    border-color: #868e96;
-                    color: #ffffff;
-                }
-                </style>
-                """,
-                unsafe_allow_html=True,
-            )
+            apply_button_style(["remove_all_files_format"])
             st.button("🗑️ Remove all files",
                       key="remove_all_files_format",
                       on_click=_clear_uploaded_files,
@@ -1642,7 +1602,7 @@ if __name__ == "__main__":
     st.markdown(css, unsafe_allow_html=True)
 
     st.sidebar.title("XRD Converter Tools")
-    st.sidebar.caption("**v0.6.1** — 2026-08-17")
+    st.sidebar.caption("**v0.8.0** — 2026-09-01")
     st.sidebar.info(
         "Visit also main app here: **[XRDlicious](https://xrdlicious.com)**. 🌀 Developed by **[IMPLANT team](https://implant.fs.cvut.cz/)**. "
         "**[Tutorial here](https://youtu.be/KwxVKadPZ6s?si=S1_67xF5J3sI7n69)**. Spot a bug or have a feature idea? Let us know at: "
@@ -1653,7 +1613,7 @@ if __name__ == "__main__":
     tool_choice = st.sidebar.radio(
         "**Select Tool:**",
         ["📄 File Format Converter", "🔄 X/Y-Axis Converter", "📈 Plotting",
-         "🌐 Chi-Scan Viewer", "🧬 Multiple .xy merge"],
+         "🌐 Chi-Scan Viewer", "🧬 Multiple .xy merge", "🖼️ Image/Photo → .xy"],
         index=0
     )
 
@@ -1667,6 +1627,8 @@ if __name__ == "__main__":
         run_chi_scan_section()
     elif tool_choice == "🧬 Multiple .xy merge":
         run_chi_merge_section()
+    elif tool_choice == "🖼️ Image/Photo → .xy":
+        run_image_digitizer_section()
     else:
         run_axis_converter()
 
@@ -1700,9 +1662,10 @@ if __name__ == "__main__":
                 pass
 
         today_views = counts.get(today, 0)
-        # Show up to the three most recent finished days (dates before today) that
-        # have recorded views. If there are none yet, nothing extra is shown.
-        finished = sorted(d for d in counts if d < today)[-3:]
+        # Show up to the seven most recent finished days (dates before today)
+        # that have recorded views. If there are none yet, nothing extra is
+        # shown.
+        finished = sorted(d for d in counts if d < today)[-7:]
         previous_days = [
             (f"{date.fromisoformat(d).day}.{date.fromisoformat(d).month}", counts[d])
             for d in finished
