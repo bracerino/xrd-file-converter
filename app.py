@@ -1435,8 +1435,18 @@ def display_conversion_visual():
         display_ecm36_ad()
 
 
+# GoatCounter endpoint for the outbound clicks on the ECM-36 banner. Not a
+# secret — it is visible in the page source of every site that uses GoatCounter.
+GOATCOUNTER_ENDPOINT = "https://brace.goatcounter.com/count"
+
+
 def display_ecm36_ad():
-    """Announcement banner for ECM-36, the 36th European Crystallographic Meeting."""
+    """Announcement banner for ECM-36, the 36th European Crystallographic Meeting.
+
+    Rendered in a component iframe rather than with ``st.markdown`` because
+    Streamlit strips ``<script>`` from markdown, and the GoatCounter snippet
+    that counts the clicks on the two outbound links has to run on the page.
+    """
     logo = _logo_data_uri("images/ecm36_logo.png")
     logo_html = (
         f'<img src="{logo}" alt="ECM-36 Prague 2027 logo" '
@@ -1460,8 +1470,18 @@ def display_ecm36_ad():
         for when, label in important_dates
     )
 
-    st.markdown(f"""
-    <div style="margin: 25px 0; padding: 22px 26px; background: linear-gradient(135deg, #ffffff 0%, #eef3ff 100%);
+    # The iframe carries none of the app's styling, so the font and the reset
+    # are repeated here; the body padding keeps the card's shadow from being
+    # clipped at the frame edge.
+    components.html(f"""
+    <style>
+        html, body {{ margin: 0; padding: 0; background: transparent;
+                      font-family: "Source Sans Pro", "Segoe UI", system-ui, -apple-system, sans-serif; }}
+        body {{ padding: 8px; }}
+        a {{ text-decoration: none; }}
+    </style>
+    <div id="ecm36-card"
+         style="padding: 22px 26px; background: linear-gradient(135deg, #ffffff 0%, #eef3ff 100%);
                 border: 1px solid #d7e0f5; border-radius: 16px;
                 box-shadow: 0 6px 20px rgba(0,0,0,0.10);">
         <div style="display: flex; align-items: center; gap: 24px; flex-wrap: wrap;">
@@ -1488,12 +1508,16 @@ def display_ecm36_ad():
         </div>
         <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; align-items: center;">
             <a href="http://www.xray.cz/ecm36/" target="_blank" rel="noopener"
+               data-goatcounter-click="ecm36-official-website"
+               data-goatcounter-title="ECM-36 official website"
                style="background: linear-gradient(135deg, #74b9ff, #0984e3); color: white; text-decoration: none;
                       padding: 9px 18px; border-radius: 9px; font-weight: 700; font-size: 0.95em;
                       box-shadow: 0 4px 12px rgba(116, 185, 255, 0.4);">
                 🌐 Official website
             </a>
             <a href="https://ecanews.org/meetings/" target="_blank" rel="noopener"
+               data-goatcounter-click="ecm36-all-eca-meetings"
+               data-goatcounter-title="All ECA meetings"
                style="color: #1e3a8a; text-decoration: none; padding: 9px 12px; border-radius: 9px;
                       font-weight: 600; font-size: 0.92em; border: 1px solid #c7d4f0; background: #ffffff;">
                 📋 All ECA meetings
@@ -1503,7 +1527,41 @@ def display_ecm36_ad():
             Dates and deadlines as announced by the organisers &mdash; please check the official website for updates.
         </div>
     </div>
-    """, unsafe_allow_html=True)
+
+    <script>
+        // allow_frame: count.js refuses to send anything from inside a frame
+        // otherwise, and every Streamlit component lives in one. no_onload
+        // skips the automatic pageview for the frame itself (which would be
+        // logged under the meaningless "about:srcdoc" path); the click
+        // handlers are bound by hand once the script has loaded instead.
+        window.goatcounter = {{allow_frame: true, no_onload: true}};
+    </script>
+    <script data-goatcounter="{GOATCOUNTER_ENDPOINT}"
+            src="https://gc.zgo.at/count.js"
+            onload="window.goatcounter.bind_events()"></script>
+
+    <script>
+        // Streamlit gives the iframe the fixed height passed below, which
+        // cannot know how the card wraps at the visitor's window width, so the
+        // frame measures its own content and resizes itself.
+        (function () {{
+            var fit = function () {{
+                try {{
+                    var frame = window.frameElement;
+                    if (!frame) return;
+                    var height = document.getElementById('ecm36-card').offsetHeight + 16;
+                    frame.style.height = height + 'px';
+                    frame.height = height;
+                }} catch (e) {{ /* keep the fallback height */ }}
+            }};
+            fit();
+            window.addEventListener('load', fit);
+            window.addEventListener('resize', fit);
+            if (window.ResizeObserver)
+                new ResizeObserver(fit).observe(document.getElementById('ecm36-card'));
+        }})();
+    </script>
+    """, height=520, scrolling=False)
 
 
 if __name__ == "__main__":
