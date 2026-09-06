@@ -264,30 +264,84 @@ def convert_xaxis_data(x_values, input_format, output_format,
         return x_values
 
 
-def apply_slit_conversion(x_data_2theta, y_data, slit_type, fixed_slit_size, irradiated_length):
+def slit_two_theta(x_measured, x_current, input_format, output_format):
+    """The 2\u03b8 values (deg) the slit correction must be evaluated at.
+
+    The correction depends on the angle at which the data were *measured*, so
+    the untouched x-column wins whenever it already holds 2\u03b8 \u2014 an x-axis
+    conversion may have replaced it with d-spacing, q, or the angles of a
+    different wavelength. Returns None when no 2\u03b8 axis is available.
+    """
+    if input_format == 'No conversion' or input_format.startswith('2theta'):
+        return np.asarray(x_measured, dtype=float)
+    if output_format and '2theta' in output_format:
+        # Measured on a d/q axis, but converted to 2\u03b8 here.
+        return np.asarray(x_current, dtype=float)
+    return None
+
+
+def apply_slit_conversion(x_data_2theta, y_data, slit_type, fixed_slit_size,
+                          irradiated_length, goniometer_radius, warn=False):
+    """Convert between fixed and automatic divergence slits.
+
+    In Bragg-Brentano geometry a fixed slit of angular aperture ``phi``
+    illuminates a sample length ``L_fixed = R * phi(rad) / sin(theta)``, with
+    ``R`` the goniometer radius, while an automatic slit holds that length at
+    the constant ``irradiated_length``. The diffracted intensity scales with
+    the illuminated length, so the two measurements differ by the
+    dimensionless ratio ``R * phi(rad) / (L_irr * sin(theta))``.
+
+    ``warn`` reports beam overspill through Streamlit; leave it off in batch
+    loops, where the message would repeat once per file.
+    """
     if slit_type == "No conversion":
         return y_data
 
-    theta_rad = np.radians(x_data_2theta / 2)
+    theta_rad = np.radians(np.asarray(x_data_2theta, dtype=float) / 2)
     valid_mask = np.abs(np.sin(theta_rad)) > 1e-6
 
-    y_converted = np.copy(y_data)
+    y_data = np.asarray(y_data, dtype=float)
+    fixed_slit_rad = np.radians(fixed_slit_size)
+    footprint_ratio = (goniometer_radius * fixed_slit_rad) / irradiated_length
+
+    adjustment_factor = np.ones(len(y_data), dtype=float)
 
     if slit_type == "Auto slit to fixed slit":
-        adjustment_factor = np.ones_like(y_data)
-        adjustment_factor[valid_mask] = fixed_slit_size / (
-                irradiated_length * np.sin(theta_rad[valid_mask])
-        )
-        y_converted = y_data * adjustment_factor
+        adjustment_factor[valid_mask] = footprint_ratio / np.sin(theta_rad[valid_mask])
 
     elif slit_type == "Fixed slit to auto slit":
-        adjustment_factor = np.ones_like(y_data)
-        adjustment_factor[valid_mask] = (
-                irradiated_length * np.sin(theta_rad[valid_mask]) / fixed_slit_size
-        )
-        y_converted = y_data * adjustment_factor
+        adjustment_factor[valid_mask] = np.sin(theta_rad[valid_mask]) / footprint_ratio
 
-    return y_converted
+    else:
+        return y_data
+
+    if warn:
+        # The fixed-slit beam has to fit on the specimen. Its footprint
+        # R*phi/sin(theta) grows past the length the automatic slit illuminates
+        # once sin(theta) < R*phi/L_irr, and a specimen no longer than L_irr
+        # then loses the overhang. The true specimen length is not known here,
+        # so this is flagged as a caveat rather than corrected for.
+        overspill_range = None
+        if np.any(valid_mask):
+            if footprint_ratio >= 1.0:
+                overspill_range = "At every angle"
+            elif np.min(np.sin(theta_rad[valid_mask])) < footprint_ratio:
+                overspill_range = (
+                    f"Below 2\u03b8 \u2248 "
+                    f"{2 * np.degrees(np.arcsin(footprint_ratio)):.1f}\u00b0"
+                )
+        if overspill_range:
+            bias = ("too high"
+                    if slit_type == "Auto slit to fixed slit"
+                    else "too low")
+            st.warning(
+                f"\u26a0\ufe0f {overspill_range} the fixed slit illuminates more than "
+                f"{irradiated_length:.1f} mm of the sample. If your specimen is shorter, "
+                f"part of the beam misses it; that is not corrected, so the converted "
+                f"intensity is {bias} there."
+            )
+
+    return y_data * adjustment_factor
 
 
 def apply_y_transformations(y_data, normalize, y_scale):
@@ -522,28 +576,59 @@ def run_axis_converter():
                 - As 2θ increases, the **irradiated area is smaller**.
                 - Results in **reduced intensity at higher angles**.
 
+                #### Irradiated length
+
+                In Bragg–Brentano geometry, a fixed divergence slit with angular
+                aperture $\\varphi$ illuminates a sample length that grows towards
+                low angles:
+
+                $$
+                L_{\\text{fixed}}(\\theta) \\approx \\frac{R\\,\\varphi_{\\text{rad}}}{\\sin\\theta},
+                \\qquad \\varphi_{\\text{rad}} = \\frac{\\pi}{180}\\,\\varphi_{\\text{deg}}
+                $$
+
+                where **R** is the goniometer radius. An automatic slit instead keeps
+                that length pinned at a constant value $L_{\\text{irr}}$. Because the
+                diffracted intensity scales with the illuminated length, the ratio of
+                the two measurements is the (dimensionless) ratio of these lengths.
+
                 #### Conversion Types
 
                 - **Fixed Slit → Auto Slit**  
-                  Adjusts for loss of intensity at higher angles by simulating constant irradiated area:
+                  Removes the low-angle enhancement of the fixed-slit footprint:
 
                   $$
-                  \\text{Intensity}_{\\text{auto}} = \\text{Intensity}_{\\text{fixed}} \\times \\frac{\\text{Irradiated Length} \\times \\sin(\\theta)}{\\text{Fixed Slit Size}}
+                  I_{\\text{auto}} = I_{\\text{fixed}} \\times \\frac{L_{\\text{irr}}\\,\\sin\\theta}{R\\,\\varphi_{\\text{rad}}}
                   $$
 
                 - **Auto Slit → Fixed Slit**  
-                  Simulates reduced illuminated area at higher angles:
+                  Re-introduces the varying illuminated length of a fixed slit:
 
                   $$
-                  \\text{Intensity}_{\\text{fixed}} = \\text{Intensity}_{\\text{auto}} \\times \\frac{\\text{Fixed Slit Size}}{\\text{Irradiated Length} \\times \\sin(\\theta)}
+                  I_{\\text{fixed}} = I_{\\text{auto}} \\times \\frac{R\\,\\varphi_{\\text{rad}}}{L_{\\text{irr}}\\,\\sin\\theta}
                   $$
 
                 #### Parameters
 
-                - **Fixed slit size (degrees)**: The opening angle of the slit in degrees.
-                - **Irradiated sample length (mm)**: Physical length of sample that is illuminated.
+                - **Fixed slit size (degrees)**: The opening angle $\\varphi$ of the slit.
+                - **Goniometer radius R (mm)**: Source–sample distance of the
+                  diffractometer (typically *150–300 mm*).
+                - **Irradiated sample length (mm)**: The constant length illuminated in
+                  the automatic-slit setting.
                   - Reflection geometry: *10–20 mm*  
                   - Transmission geometry: *1–2 mm*
+
+                #### Assumptions and limitations
+
+                - The correction is a pure geometry factor $\\propto 1/\\sin\\theta$ and
+                  assumes an infinitely thick, homogeneous specimen.
+                - **Beam overspill is not treated**: at low angles the fixed-slit
+                  footprint $R\\varphi_{\\text{rad}}/\\sin\\theta$ can grow past the
+                  specimen, and the part of the beam that misses it is lost. The
+                  specimen length is not asked for here, so the app can only flag
+                  where the footprint exceeds $L_{\\text{irr}}$ as a hint.
+                - Other instrumental effects (axial divergence, Soller slits, knife
+                  edge) are not included.
 
                 **Note:** Slit conversion only works when data is in 2θ format.
                 """)
@@ -559,6 +644,7 @@ def run_axis_converter():
 
             fixed_slit_size = None
             irradiated_length = None
+            goniometer_radius = None
 
             if slit_conversion_type != "No conversion":
                 col_slit1, col_slit2 = st.columns(2)
@@ -571,13 +657,25 @@ def run_axis_converter():
                         step=0.1,
                         format="%.2f"
                     )
+                    goniometer_radius = st.number_input(
+                        "Goniometer radius R (mm)",
+                        min_value=1.0,
+                        max_value=1000.0,
+                        value=250.0,
+                        step=5.0,
+                        format="%.1f",
+                        help="Source-sample distance. Together with the slit "
+                             "aperture it sets the irradiated length of the "
+                             "fixed slit, L = R*phi(rad)/sin(theta)."
+                    )
                 with col_slit2:
                     irradiated_length = st.number_input(
                         "Irradiated sample length (mm)",
                         min_value=1.0,
                         max_value=50.0,
                         value=10.0,
-                        step=1.0
+                        step=1.0,
+                        help="Constant length illuminated by the automatic slit."
                     )
                 st.caption("Typical: 10-20 mm (reflection), 1-2 mm (transmission)")
 
@@ -705,6 +803,10 @@ def run_axis_converter():
                             if df is not None:
                                 x_data = df['X'].values
                                 y_data = df['Y'].values
+                                # The slit correction needs the angle the data
+                                # were measured at, which the x-axis conversion
+                                # below may overwrite.
+                                x_measured = np.asarray(x_data, dtype=float)
 
                                 if bg_active:
                                     y_data = remove_background(
@@ -722,20 +824,19 @@ def run_axis_converter():
                                     valid_mask = ~np.isnan(x_converted)
                                     x_data = x_converted[valid_mask]
                                     y_data = y_data[valid_mask]
+                                    x_measured = x_measured[valid_mask]
 
-                                is_2theta = False
-                                if input_format == 'No conversion':
-                                    is_2theta = True
-                                elif output_format and '2theta' in output_format:
-                                    is_2theta = True
+                                two_theta = slit_two_theta(
+                                    x_measured, x_data, input_format, output_format)
 
-                                if slit_conversion_type != "No conversion" and is_2theta:
+                                if slit_conversion_type != "No conversion" and two_theta is not None:
                                     y_data = apply_slit_conversion(
-                                        x_data,
+                                        two_theta,
                                         y_data,
                                         slit_conversion_type,
                                         fixed_slit_size,
-                                        irradiated_length
+                                        irradiated_length,
+                                        goniometer_radius
                                     )
 
                                 y_data = apply_y_transformations(y_data, normalize_y, y_scale)
@@ -780,6 +881,9 @@ def run_axis_converter():
 
                 x_data = data_df['X'].values
                 y_data = data_df['Y'].values
+                # The slit correction needs the angle the data were measured
+                # at, which the x-axis conversion below may overwrite.
+                x_measured = np.asarray(x_data, dtype=float)
 
                 if bg_active:
                     y_data = remove_background(
@@ -797,20 +901,19 @@ def run_axis_converter():
                     valid_mask = ~np.isnan(x_converted)
                     x_data = x_converted[valid_mask]
                     y_data = y_data[valid_mask]
+                    x_measured = x_measured[valid_mask]
 
-                is_2theta = False
-                if input_format == 'No conversion':
-                    is_2theta = True
-                elif output_format and '2theta' in output_format:
-                    is_2theta = True
+                two_theta = slit_two_theta(
+                    x_measured, x_data, input_format, output_format)
 
-                if slit_conversion_type != "No conversion" and is_2theta:
+                if slit_conversion_type != "No conversion" and two_theta is not None:
                     y_data = apply_slit_conversion(
-                        x_data,
+                        two_theta,
                         y_data,
                         slit_conversion_type,
                         fixed_slit_size,
-                        irradiated_length
+                        irradiated_length,
+                        goniometer_radius
                     )
 
                 y_data = apply_y_transformations(y_data, normalize_y, y_scale)
@@ -889,6 +992,9 @@ def run_axis_converter():
         x_display = raw_x
         y_display = base_y
         x_axis_title = "X-axis"
+        # The slit correction needs the angle the data were measured at, which
+        # the x-axis conversion below may overwrite.
+        x_measured = np.asarray(raw_x, dtype=float)
 
         if input_format != 'No conversion' and output_format:
             x_converted = convert_xaxis_data(
@@ -902,6 +1008,7 @@ def run_axis_converter():
             valid_mask = ~np.isnan(x_converted)
             x_display = x_converted[valid_mask]
             y_display = base_y[valid_mask]
+            x_measured = x_measured[valid_mask]
 
             x_axis_title = get_axis_label(output_format, output_wavelength)
 
@@ -911,22 +1018,23 @@ def run_axis_converter():
                     "due to invalid conversion values"
                 )
 
-        is_2theta = False
         if input_format == 'No conversion':
-            is_2theta = True
             x_axis_title = "2θ (°)"
-        elif output_format and '2theta' in output_format:
-            is_2theta = True
 
-        if slit_conversion_type != "No conversion" and is_2theta:
+        two_theta = slit_two_theta(
+            x_measured, x_display, input_format, output_format)
+
+        if slit_conversion_type != "No conversion" and two_theta is not None:
             y_display = apply_slit_conversion(
-                x_display,
+                two_theta,
                 y_display,
                 slit_conversion_type,
                 fixed_slit_size,
-                irradiated_length
+                irradiated_length,
+                goniometer_radius,
+                warn=True
             )
-        elif slit_conversion_type != "No conversion" and not is_2theta:
+        elif slit_conversion_type != "No conversion":
             st.warning("⚠️ Slit conversion only works when data is in 2θ format")
 
         y_display = apply_y_transformations(y_display, normalize_y, y_scale)
@@ -938,7 +1046,7 @@ def run_axis_converter():
         y_axis_title = get_y_axis_label(normalize_y, y_scale)
 
         any_conversion = (input_format != 'No conversion' and output_format) or \
-                         (slit_conversion_type != "No conversion" and is_2theta) or \
+                         (slit_conversion_type != "No conversion" and two_theta is not None) or \
                          normalize_y or \
                          y_scale != "linear"
 
