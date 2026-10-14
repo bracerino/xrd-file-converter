@@ -13,6 +13,7 @@ from xrd_conversion import run_axis_converter, convert_xaxis_data, get_axis_labe
 from chi_scan_section import run_chi_scan_section
 from chi_merge_section import run_chi_merge_section
 from plotting_section import run_plotting_section
+from data_reduction_section import run_data_reduction_section
 from image_digitizer_section import run_image_digitizer_section
 from download_log import log_download
 from ui_style import apply_button_style
@@ -1660,7 +1661,7 @@ if __name__ == "__main__":
     st.markdown(css, unsafe_allow_html=True)
 
     st.sidebar.title("XRD Converter Tools")
-    st.sidebar.caption("**v0.8.1** — 2026-09-06")
+    st.sidebar.caption("**v0.8.2** — 2026-10-14")
     st.sidebar.info(
         "Visit also main app here: **[XRDlicious](https://xrdlicious.com)**. 🌀 Developed by **[IMPLANT team](https://implant.fs.cvut.cz/)**. "
         "**[Tutorial here](https://youtu.be/KwxVKadPZ6s?si=S1_67xF5J3sI7n69)**. Spot a bug or have a feature idea? Let us know at: "
@@ -1670,7 +1671,7 @@ if __name__ == "__main__":
     st.sidebar.title("Select between format and X/Y-Axis Conversion")
     tool_choice = st.sidebar.radio(
         "**Select Tool:**",
-        ["📄 File Format Converter", "🔄 X/Y-Axis Converter", "📈 Plotting",
+        ["📄 File Format Converter", "🔄 X/Y-Axis Converter", "✂️ Data Reduction", "📈 Plotting",
          "🌐 Chi-Scan Viewer", "🧬 Multiple .xy merge", "🖼️ Image/Photo → .xy"],
         index=0
     )
@@ -1678,6 +1679,8 @@ if __name__ == "__main__":
     if tool_choice == "📄 File Format Converter":
         run_data_converter()
         display_conversion_visual()
+    elif tool_choice == "✂️ Data Reduction":
+        run_data_reduction_section()
     elif tool_choice == "📈 Plotting":
         run_plotting_section()
     elif tool_choice == "🌐 Chi-Scan Viewer":

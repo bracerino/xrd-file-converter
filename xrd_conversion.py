@@ -10,6 +10,7 @@ from datetime import datetime
 import zipfile
 
 from download_log import log_download
+from xrd_parsers import parse_xrdml, parse_ras, parse_rasx, parse_raw
 
 
 def timestamp_suffix():
@@ -139,6 +140,38 @@ def parse_xy_simple(file_content):
     except Exception as e:
         st.error(f"Failed to parse file. Error: {e}")
         return None
+
+
+AXIS_UPLOAD_EXTENSIONS = ["xy", "txt", "dat", "csv", "data",
+                          "xrdml", "xml", "ras", "rasx", "raw"]
+
+
+def load_xy_file(uploaded_file):
+    """Read an uploaded file into a DataFrame with ``X``/``Y`` columns.
+
+    Instrument formats (.xrdml, .ras, .rasx, .raw) go through the shared
+    parsers in ``xrd_parsers``; anything else is read as a plain two-column
+    text table.
+    """
+    extension = uploaded_file.name.lower().rsplit('.', 1)[-1]
+    file_bytes = uploaded_file.getvalue()
+
+    if extension in ('xrdml', 'xml'):
+        _, df = parse_xrdml(file_bytes.decode("utf-8", errors='replace'))
+    elif extension == 'ras':
+        _, _, df = parse_ras(file_bytes.decode("utf-8", errors='replace'))
+    elif extension == 'rasx':
+        _, _, df = parse_rasx(BytesIO(file_bytes))
+    elif extension == 'raw':
+        _, df = parse_raw(file_bytes)
+    else:
+        return parse_xy_simple(file_bytes.decode("utf-8", errors='replace'))
+
+    if df is None or df.empty:
+        return None
+    df = df.iloc[:, :2].copy()
+    df.columns = ['X', 'Y']
+    return df.dropna().astype(float).reset_index(drop=True)
 
 
 def convert_xaxis_data(x_values, input_format, output_format,
@@ -415,8 +448,8 @@ def run_axis_converter():
         st.session_state.axis_uploader_key += 1
 
     uploaded_files_raw = st.file_uploader(
-        "Upload XRD Data File(s) (.xy, .txt, .dat, .csv)",
-        type=["xy", "txt", "dat", "csv", "data"],
+        "Upload XRD Data File(s) (.xy, .txt, .dat, .csv, .xrdml, .ras, .rasx, .raw)",
+        type=AXIS_UPLOAD_EXTENSIONS,
         accept_multiple_files=True,
         key=f"axis_file_uploader_{st.session_state.axis_uploader_key}"
     )
@@ -445,8 +478,7 @@ def run_axis_converter():
 
     first_file = uploaded_files[preview_idx]
 
-    file_content = first_file.getvalue().decode("utf-8", errors='replace')
-    data_df = parse_xy_simple(file_content)
+    data_df = load_xy_file(first_file)
 
     if data_df is None:
         st.error("Failed to parse the uploaded file.")
@@ -797,8 +829,7 @@ def run_axis_converter():
                     zip_buffer = BytesIO()
                     with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
                         for uploaded_file in uploaded_files:
-                            content = uploaded_file.getvalue().decode("utf-8", errors='replace')
-                            df = parse_xy_simple(content)
+                            df = load_xy_file(uploaded_file)
 
                             if df is not None:
                                 x_data = df['X'].values
