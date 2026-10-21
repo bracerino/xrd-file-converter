@@ -79,7 +79,7 @@ def size_change(before, after):
 
 
 def run_data_reduction_section():
-    st.markdown("### ✂️ Data Point Reduction")
+    st.markdown("### ✂️ Reduction / Averaging")
     st.info(
         "✂️ Reduce the number of data points in your XRD patterns, e.g. to "
         "shrink the file size: **keep every N-th point**, **average every N "
@@ -149,7 +149,7 @@ def run_data_reduction_section():
         reduce_method = st.radio(
             "Reduction Method",
             REDUCE_METHODS,
-            index=0,
+            index=1,
             key="reduce_method",
         )
 
@@ -157,7 +157,7 @@ def run_data_reduction_section():
         if reduce_method in ("Keep every N-th point",
                              "Average every N points (binning)"):
             reduce_params["n"] = st.number_input(
-                "N", min_value=2, max_value=1000, value=2, step=1,
+                "N", min_value=2, max_value=1000, value=5, step=1,
                 key="reduce_n",
                 help="Keep every N-th point, or average each group of N "
                      "neighbouring points into one (binning also "
@@ -251,7 +251,7 @@ def run_data_reduction_section():
                     type="primary",
                     width='stretch',
                     on_click=log_download,
-                    args=("Data Reduction",),
+                    args=("Reduction / Averaging",),
                 )
         else:
             default_name = first_file.name.rsplit('.', 1)[0] + '_reduced.xy'
@@ -266,7 +266,7 @@ def run_data_reduction_section():
                 type="primary",
                 width='stretch',
                 on_click=log_download,
-                args=("Data Reduction",),
+                args=("Reduction / Averaging",),
             )
 
     with col2:

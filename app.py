@@ -1175,7 +1175,13 @@ def run_data_converter():
 
                     if is_batch:
                         st.write(f"**Batch conversion for {len(uploaded_files)} files.**")
-                        if st.button("⬇️ Download All as .xy (.zip)", type="primary", width='stretch'):
+                        zip_filename = st.text_input(
+                            "Enter filename for the .zip download:",
+                            f"converted_xy_files_{timestamp_suffix()}.zip",
+                            key="zip_name_to_xy")
+                        if not zip_filename.lower().endswith('.zip'):
+                            zip_filename += '.zip'
+                        if st.button("📦 Prepare All as .xy for Download (.zip)", type="primary", width='stretch'):
                             zip_buffer = BytesIO()
                             with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
                                 for uploaded_file in uploaded_files:
@@ -1199,7 +1205,7 @@ def run_data_converter():
                             st.download_button(
                                 label="📦 Download ZIP",
                                 data=zip_buffer.getvalue(),
-                                file_name=f"converted_xy_files_{timestamp_suffix()}.zip",
+                                file_name=zip_filename,
                                 mime="application/zip",
                                 width='stretch',
                                 on_click=log_download,
@@ -1306,6 +1312,12 @@ def run_data_converter():
                     if st.session_state.get(applied_key):
                         applied_metadata_df = st.session_state[df_state_key]
                         if is_batch:
+                            zip_filename = st.text_input(
+                                "Enter filename for the .zip download:",
+                                f"converted_to_{output_format}_{timestamp_suffix()}.zip",
+                                key=f"zip_name_from_xy_{output_format}")
+                            if not zip_filename.lower().endswith('.zip'):
+                                zip_filename += '.zip'
                             zip_buffer = BytesIO()
                             with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
                                 for uploaded_file in uploaded_files:
@@ -1328,7 +1340,7 @@ def run_data_converter():
                             st.download_button(
                                 label=f"📦 Download All as {output_format} (.zip)",
                                 data=zip_buffer.getvalue(),
-                                file_name=f"converted_to_{output_format}_{timestamp_suffix()}.zip",
+                                file_name=zip_filename,
                                 mime="application/zip",
                                 type="primary",
                                 width='stretch',
@@ -1661,7 +1673,7 @@ if __name__ == "__main__":
     st.markdown(css, unsafe_allow_html=True)
 
     st.sidebar.title("XRD Converter Tools")
-    st.sidebar.caption("**v0.8.2** — 2026-10-14")
+    st.sidebar.caption("**v0.8.3** — 2026-10-21")
     st.sidebar.info(
         "Visit also main app here: **[XRDlicious](https://xrdlicious.com)**. 🌀 Developed by **[IMPLANT team](https://implant.fs.cvut.cz/)**. "
         "**[Tutorial here](https://youtu.be/KwxVKadPZ6s?si=S1_67xF5J3sI7n69)**. Spot a bug or have a feature idea? Let us know at: "
@@ -1671,7 +1683,7 @@ if __name__ == "__main__":
     st.sidebar.title("Select between format and X/Y-Axis Conversion")
     tool_choice = st.sidebar.radio(
         "**Select Tool:**",
-        ["📄 File Format Converter", "🔄 X/Y-Axis Converter", "✂️ Data Reduction", "📈 Plotting",
+        ["📄 File Format Converter", "🔄 X/Y-Axis Converter", "✂️ Reduction / Averaging", "📈 Plotting",
          "🌐 Chi-Scan Viewer", "🧬 Multiple .xy merge", "🖼️ Image/Photo → .xy"],
         index=0
     )
@@ -1679,7 +1691,7 @@ if __name__ == "__main__":
     if tool_choice == "📄 File Format Converter":
         run_data_converter()
         display_conversion_visual()
-    elif tool_choice == "✂️ Data Reduction":
+    elif tool_choice == "✂️ Reduction / Averaging":
         run_data_reduction_section()
     elif tool_choice == "📈 Plotting":
         run_plotting_section()

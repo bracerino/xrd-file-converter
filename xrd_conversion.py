@@ -822,6 +822,12 @@ def run_axis_converter():
 
         if any_conversion:
             if is_batch:
+                zip_filename = st.text_input(
+                    "Output .zip filename:",
+                    f"converted_xrd_files_{timestamp_suffix()}.zip",
+                    key="axis_zip_name")
+                if not zip_filename.lower().endswith('.zip'):
+                    zip_filename += '.zip'
                 if st.button("📦 Prepare All Converted Files for Download (.zip)",
                              type="primary",
                              width='stretch'):
@@ -899,7 +905,7 @@ def run_axis_converter():
                     st.download_button(
                         label="⬇️ Download ZIP",
                         data=zip_buffer.getvalue(),
-                        file_name=f"converted_xrd_files_{timestamp_suffix()}.zip",
+                        file_name=zip_filename,
                         mime="application/zip",
                         type = "primary",
                         width='stretch',
