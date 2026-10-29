@@ -10,7 +10,7 @@ from datetime import datetime
 import zipfile
 
 from download_log import log_download
-from xrd_parsers import parse_xrdml, parse_ras, parse_rasx, parse_raw
+from xrd_parsers import parse_xrdml, parse_ras, parse_rasx, parse_raw, parse_xy
 
 
 def timestamp_suffix():
@@ -115,33 +115,6 @@ def remove_background(x, y, method, params):
         return np.asarray(y, dtype=float)
 
 
-def parse_xy_simple(file_content):
-    try:
-        lines = file_content.splitlines()
-        if not lines:
-            return None
-
-        first_line = lines[0]
-        has_header = any(char.isalpha() for char in first_line)
-
-        data_io = StringIO(file_content)
-        skiprows = 1 if has_header else 0
-
-        df = pd.read_csv(
-            data_io,
-            sep=r'[\s,;\t]+',
-            engine='python',
-            header=None,
-            skiprows=skiprows,
-            names=['X', 'Y'],
-            comment='#'
-        )
-        return df.dropna().astype(float)
-    except Exception as e:
-        st.error(f"Failed to parse file. Error: {e}")
-        return None
-
-
 AXIS_UPLOAD_EXTENSIONS = ["xy", "txt", "dat", "csv", "data",
                           "xrdml", "xml", "ras", "rasx", "raw"]
 
@@ -165,7 +138,9 @@ def load_xy_file(uploaded_file):
     elif extension == 'raw':
         _, df = parse_raw(file_bytes)
     else:
-        return parse_xy_simple(file_bytes.decode("utf-8", errors='replace'))
+        # parse_xy skips headers of any length (e.g. TEM ProcessDiffraction
+        # .dat files) and extra columns.
+        df = parse_xy(file_bytes.decode("utf-8", errors='replace'))
 
     if df is None or df.empty:
         return None

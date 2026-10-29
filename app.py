@@ -19,7 +19,8 @@ from download_log import log_download
 from ui_style import apply_button_style
 from xrd_parsers import (extract_key_ras_metadata, metadata_dataframe,
                          parse_xrdml, parse_ras, parse_rasx, parse_raw,
-                         parse_xy)
+                         parse_xy, check_regular_grid, resample_to_regular_grid,
+                         detect_x_axis)
 
 
 # Characteristic wavelengths (Kα1, Kα2, Kβ) in Å of the usual laboratory
@@ -148,7 +149,7 @@ def run_data_converter():
         start_angle = f"{data_df['2Theta'].min():.4f}"
         stop_angle = f"{data_df['2Theta'].max():.4f}"
         data_count = str(len(data_df))
-        step_size = f"{abs(data_df['2Theta'].iloc[1] - data_df['2Theta'].iloc[0]):.4f}" if len(
+        step_size = f"{abs(data_df['2Theta'].iloc[1] - data_df['2Theta'].iloc[0]):.6f}" if len(
             data_df) > 1 else "0.0100"
 
         try:
@@ -1236,16 +1237,52 @@ def run_data_converter():
                     _render_preview_file_slider()
 
 
-        elif file_ext in ['xy', 'dat', 'txt']:
+        elif file_ext in ['xy', 'dat', 'txt', 'csv']:
             file_content = first_file.getvalue().decode("utf-8", errors='replace')
             data_df = parse_xy(file_content)
+            # Electron-diffraction files (e.g. ProcessDiffraction for TEM) declare
+            # a k = 2π/d, s = 1/d or d x-axis in their header. The values are
+            # written to the output unchanged; the header only labels the axis.
+            x_axis = detect_x_axis(file_content)
+            is_2theta = x_axis is None or x_axis[0] == '2theta'
+            x_label = "2θ (°)" if is_2theta else x_axis[2]
+            u = "°" if is_2theta else ""  # unit appended to step values
 
             if data_df is not None:
+                # .xrdml stores only the start/end angle (and .ras/.raw a single
+                # step), so the points must be evenly spaced — otherwise every
+                # intensity ends up at the wrong angle. An irregular x column is
+                # interpolated onto an even grid before export.
+                grid_info = check_regular_grid(data_df)
+                interp_step = None
+
+                def _export_df(df):
+                    info = check_regular_grid(df)
+                    if info['regular']:
+                        return df
+                    return resample_to_regular_grid(df, interp_step or info['median_step'])
+
                 col1, col2 = st.columns([1, 1.5])
                 with col1:
                     st.markdown("#### 📝 Edit Details for Output File(s)")
                     if is_batch:
                         st.info(f"These settings will be applied to all **{len(uploaded_files)} files**.")
+                    if not is_2theta:
+                        st.info(
+                            f"ℹ️ The header of `{first_file.name}` declares the x-axis as "
+                            f"**{x_axis[2]}** (e.g. TEM electron diffraction). The x values are "
+                            f"kept unchanged in the output file.")
+                    if not grid_info['regular']:
+                        interp_step = st.number_input(
+                            f"Step for interpolation{' (°)' if is_2theta else ''}",
+                            min_value=1e-6,
+                            value=float(f"{grid_info['median_step']:.6g}"),
+                            step=float(f"{grid_info['median_step'] / 10:.2g}"),
+                            format="%.6f",
+                            key=f"xy_interp_step_{st.session_state.uploader_key}",
+                            help="Spacing of the regular grid written to the output file. "
+                                 "Defaults to the median step of the data. In batch mode "
+                                 "it is used for every file whose grid is irregular.")
                     fmt_col, anode_col = st.columns(2)
                     with fmt_col:
                         output_format = st.selectbox("Select Output Format", ['XRDML', 'RAS', 'RAW'])
@@ -1323,6 +1360,7 @@ def run_data_converter():
                                 for uploaded_file in uploaded_files:
                                     df_to_convert = parse_xy(uploaded_file.getvalue().decode("utf-8", errors='replace'))
                                     if df_to_convert is not None:
+                                        df_to_convert = _export_df(df_to_convert)
                                         new_filename = uploaded_file.name.rsplit('.', 1)[0] + f'.{file_extension}'
                                         file_content_to_download = None
                                         if output_format == 'RAS':
@@ -1353,15 +1391,16 @@ def run_data_converter():
 
                             file_content_to_download = None
                             mime_type = 'application/octet-stream'
+                            export_df = _export_df(data_df)
                             if output_format == 'RAS':
-                                file_content_to_download = generate_ras(applied_metadata_df, data_df)
+                                file_content_to_download = generate_ras(applied_metadata_df, export_df)
                                 mime_type = 'text/plain'
                             elif output_format == 'XRDML':
-                                file_content_to_download = generate_xrdml(applied_metadata_df, data_df,
+                                file_content_to_download = generate_xrdml(applied_metadata_df, export_df,
                                                                           filename=first_file.name)
                                 mime_type = 'application/xml'
                             elif output_format == 'RAW':
-                                file_content_to_download = generate_raw(applied_metadata_df, data_df)
+                                file_content_to_download = generate_raw(applied_metadata_df, export_df)
 
                             if file_content_to_download:
                                 st.download_button(
@@ -1377,17 +1416,38 @@ def run_data_converter():
 
                 with col2:
                     st.markdown("#### 📈 Diffraction Pattern")
-                    fig = go.Figure(
-                        go.Scatter(x=data_df['2Theta'], y=data_df['Intensity'], mode='lines', name='Intensity'))
+                    if grid_info['regular']:
+                        fig = go.Figure(
+                            go.Scatter(x=data_df['2Theta'], y=data_df['Intensity'], mode='lines', name='Intensity'))
+                    else:
+                        preview_df = _export_df(data_df)
+                        out_info = check_regular_grid(preview_df)
+                        fig = go.Figure([
+                            go.Scatter(x=data_df['2Theta'], y=data_df['Intensity'], mode='markers',
+                                       name='Original data', marker=dict(size=6, color='rgba(120,120,120,0.6)')),
+                            go.Scatter(x=preview_df['2Theta'], y=preview_df['Intensity'], mode='lines',
+                                       name=f'Interpolated (exported, step {out_info["implied_step"]:.6g}{u})'),
+                        ])
+                        st.caption(
+                            f"Exported grid: {preview_df['2Theta'].iloc[0]:.6g}{u} → "
+                            f"{preview_df['2Theta'].iloc[-1]:.6g}{u}, step {out_info['implied_step']:.6g}{u}, "
+                            f"{len(preview_df)} points (original: {len(data_df)} points).")
                     fig.update_layout(
                         title=dict(text=f"Data from {first_file.name}", font=dict(size=24)),
-                        xaxis_title="2θ (°)", yaxis_title="Intensity",
+                        xaxis_title=x_label, yaxis_title="Intensity",
                         height=550, margin=dict(l=40, r=40, t=60, b=40),
                         font=dict(size=18),
                         xaxis=dict(title_font=dict(size=22), tickfont=dict(size=16)),
                         yaxis=dict(title_font=dict(size=22), tickfont=dict(size=16)),
                         legend=dict(font=dict(size=18)))
                     st.plotly_chart(fig, width='stretch')
+                    if not grid_info['regular']:
+                        st.warning(
+                            f"⚠️ The x column of `{first_file.name}` is **not evenly spaced** "
+                            f"(steps from {grid_info['min_step']:.5g}{u} to {grid_info['max_step']:.5g}{u}, "
+                            f"median {grid_info['median_step']:.5g}{u}). The output formats assume a "
+                            f"constant step, so the data will be **linearly interpolated** onto a "
+                            f"regular grid before export (shown in the chart).")
                     _render_preview_file_slider()
 
 
@@ -1673,7 +1733,7 @@ if __name__ == "__main__":
     st.markdown(css, unsafe_allow_html=True)
 
     st.sidebar.title("XRD Converter Tools")
-    st.sidebar.caption("**v0.8.3** — 2026-10-21")
+    st.sidebar.caption("**v0.8.4** — 2026-10-29")
     st.sidebar.info(
         "Visit also main app here: **[XRDlicious](https://xrdlicious.com)**. 🌀 Developed by **[IMPLANT team](https://implant.fs.cvut.cz/)**. "
         "**[Tutorial here](https://youtu.be/KwxVKadPZ6s?si=S1_67xF5J3sI7n69)**. Spot a bug or have a feature idea? Let us know at: "

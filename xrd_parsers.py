@@ -593,18 +593,118 @@ def parse_raw(file_content_bytes):
 
 
 def parse_xy(file_content):
+    """Read a two-column (x, intensity) text file: .xy, .dat, .txt or .csv.
+
+    Columns may be separated by whitespace, commas or semicolons. Any line that
+    does not start with two numbers — a header of any length, quoted column
+    names, ``#`` comments — is skipped, and only the first two columns are
+    kept (a third standard-deviation column is ignored). Rows are sorted by x.
+    """
     try:
-        lines = file_content.splitlines()
-        if not lines:
-            st.error("The XY file is empty.")
+        rows = []
+        for line in file_content.splitlines():
+            line = line.split('#', 1)[0].strip()
+            if not line:
+                continue
+            fields = [f.strip('"\'') for f in re.split(r'[\s,;]+', line) if f]
+            if len(fields) < 2:
+                continue
+            try:
+                rows.append((float(fields[0]), float(fields[1])))
+            except ValueError:
+                continue
+        if not rows:
+            st.error("No numeric two-column data found in the file.")
             return None
-        first_line = lines[0]
-        has_header = any(char.isalpha() for char in first_line)
-        data_io = StringIO(file_content)
-        skiprows = 1 if has_header else 0
-        df = pd.read_csv(data_io, sep=r'[\s,;]+', engine='python', header=None, skiprows=skiprows,
-                         names=['2Theta', 'Intensity'], comment='#')
-        return df.dropna().astype(float)
+        df = pd.DataFrame(rows, columns=['2Theta', 'Intensity'])
+        df = df[np.isfinite(df['2Theta']) & np.isfinite(df['Intensity'])]
+        return df.sort_values('2Theta', kind='stable').reset_index(drop=True)
     except Exception as e:
         st.error(f"Failed to parse XY file. Error: {e}")
         return None
+
+
+def check_regular_grid(df, tolerance=0.05):
+    """Tell whether the x column of ``df`` lies on an evenly spaced grid.
+
+    Formats such as .xrdml store only the start and end angle and imply an even
+    step between them, so every point is placed at
+    ``start + i * (end - start) / (n - 1)``. The grid counts as regular when no
+    actual x deviates from that implied position by more than ``tolerance``
+    times the step — the size of the error the export would otherwise
+    introduce.
+
+    Returns a dict with ``regular`` (bool), ``n_points``, ``implied_step``,
+    ``median_step``, ``min_step``, ``max_step`` and ``max_deviation`` (in steps).
+    """
+    x = df['2Theta'].to_numpy(dtype=float)
+    n = len(x)
+    if n < 3:
+        step = float(x[1] - x[0]) if n == 2 else 0.0
+        return dict(regular=True, n_points=n, implied_step=step, median_step=step,
+                    min_step=step, max_step=step, max_deviation=0.0)
+    steps = np.diff(x)
+    implied_step = (x[-1] - x[0]) / (n - 1)
+    median_step = float(np.median(steps))
+    if implied_step <= 0:
+        max_dev = np.inf
+    else:
+        max_dev = float(np.max(np.abs(x - (x[0] + np.arange(n) * implied_step))) / implied_step)
+    regular = bool(max_dev <= tolerance and np.all(steps > 0))
+    return dict(regular=regular, n_points=n, implied_step=float(implied_step),
+                median_step=median_step, min_step=float(steps.min()),
+                max_step=float(steps.max()), max_deviation=max_dev)
+
+
+def resample_to_regular_grid(df, step):
+    """Linearly interpolate ``df`` onto an evenly spaced x grid of ``step``.
+
+    The grid starts at the first x and runs up to (not past) the last one.
+    Duplicate x values are averaged first so the interpolation is well defined.
+    """
+    clean = (df[['2Theta', 'Intensity']].astype(float)
+             .groupby('2Theta', as_index=False).mean()
+             .sort_values('2Theta'))
+    x = clean['2Theta'].to_numpy()
+    y = clean['Intensity'].to_numpy()
+    step = float(step)
+    if len(x) < 2 or step <= 0:
+        return clean.reset_index(drop=True)
+    n = int(np.floor((x[-1] - x[0]) / step + 1e-9)) + 1
+    new_x = x[0] + np.arange(n) * step
+    return pd.DataFrame({'2Theta': new_x, 'Intensity': np.interp(new_x, x, y)})
+
+
+def detect_x_axis(file_content):
+    """Recognise the x-axis quantity declared in a text file's header.
+
+    Electron-diffraction software (e.g. ProcessDiffraction for TEM) writes a
+    line such as ``[X-axis_type = k {=2*Pi/d} [1/nm]]``. Returns
+    ``(quantity, unit, label)`` with quantity one of ``'q'`` (2π/d), ``'s'``
+    (1/d), ``'d'`` or ``'2theta'`` and unit ``'nm'``, ``'A'`` or ``'deg'`` — or
+    ``None`` when no such declaration is found (plain 2θ data is assumed).
+    """
+    for line in file_content.splitlines()[:50]:
+        m = re.search(r'X-?axis[_ ]?type\s*[=:]\s*(.+)', line, re.IGNORECASE)
+        if not m:
+            continue
+        label = m.group(1).strip().strip('"').strip()
+        if label.endswith(']') and label.count(']') > label.count('['):
+            label = label[:-1].strip()  # closing bracket of "[X-axis_type = ...]"
+        text = label.lower().replace(' ', '')
+        units = re.findall(r'\[([^\[\]]+)\]', label)
+        unit_text = units[-1].lower().replace(' ', '') if units else ''
+        if 'theta' in text or text.startswith('2th'):
+            return '2theta', 'deg', label
+        if '2*pi' in text or '2pi' in text or text[:1] in ('k', 'q'):
+            quantity = 'q'
+        elif text.startswith('s') or '1/d' in text:
+            quantity = 's'
+        elif text.startswith('d'):
+            quantity = 'd'
+        else:
+            return None
+        unit = 'nm' if 'nm' in unit_text else 'A'
+        return quantity, unit, label
+    return None
+
