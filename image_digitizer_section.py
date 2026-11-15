@@ -1678,6 +1678,11 @@ def run_image_digitizer_section():
     st.title("🖼️ Image / Photo → .xy")
     st.caption("Trace the curves in a picture of a plot — a figure from a paper, a "
                "screenshot, or a photo taken at an angle — and save them as .xy files.")
+    with st.expander("How to **Cite**", icon="📚", expanded=False):
+        st.markdown("""
+        If you like the app, please cite the following source:
+        - **XRDlicious, 2025** – [Lebeda, Miroslav, et al. XRDlicious: an interactive web-based platform for online calculation of diffraction patterns and radial distribution functions from crystal structures. Journal of Applied Crystallography, 2025, 58.5.](https://doi.org/10.1107/S1600576725005370).
+        """)
 
     if "digi_uploader_key" not in st.session_state:
         st.session_state.digi_uploader_key = 0

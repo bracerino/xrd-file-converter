@@ -80,6 +80,11 @@ def size_change(before, after):
 
 def run_data_reduction_section():
     st.markdown("### ✂️ Reduction / Averaging")
+    with st.expander("How to **Cite**", icon="📚", expanded=False):
+        st.markdown("""
+        If you like the app, please cite the following source:
+        - **XRDlicious, 2025** – [Lebeda, Miroslav, et al. XRDlicious: an interactive web-based platform for online calculation of diffraction patterns and radial distribution functions from crystal structures. Journal of Applied Crystallography, 2025, 58.5.](https://doi.org/10.1107/S1600576725005370).
+        """)
     st.info(
         "✂️ Reduce the number of data points in your XRD patterns, e.g. to "
         "shrink the file size: **keep every N-th point**, **average every N "
@@ -140,7 +145,7 @@ def run_data_reduction_section():
                       key="remove_all_files_reduce",
                       on_click=_clear_reduce_uploaded_files,
                       type="primary",
-                      use_container_width=True)
+                      width="stretch")
 
         if is_batch:
             st.success(f"✅ **Batch mode active:** {len(uploaded_files)} files uploaded")

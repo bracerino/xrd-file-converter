@@ -471,7 +471,7 @@ def run_axis_converter():
                       key="remove_all_files_axis",
                       on_click=_clear_axis_uploaded_files,
                       type="primary",
-                      use_container_width=True)
+                      width="stretch")
 
         if is_batch:
             st.success(f"✅ **Batch mode active:** {len(uploaded_files)} files uploaded")

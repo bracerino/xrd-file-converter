@@ -36,10 +36,11 @@ ANODE_PRESETS = {
 }
 
 # Which rows of the metadata table hold that information, per output format.
-# A .ras file names only the target — the Rigaku software derives the
-# wavelengths from it — so it has no wavelength rows to fill.
 ANODE_ROWS = {
-    "RAS": {"anode": "HW_XG_TARGET_NAME"},
+    "RAS": {"anode": "HW_XG_TARGET_NAME",
+            "ka1": "HW_XG_WAVE_LENGTH_ALPHA1",
+            "ka2": "HW_XG_WAVE_LENGTH_ALPHA2",
+            "kb": "HW_XG_WAVE_LENGTH_BETA"},
     "RAW": {"anode": "X-ray Target",
             "ka1": "K-Alpha1 (Å)",
             "ka2": "K-Alpha2 (Å)",
@@ -68,6 +69,11 @@ def apply_anode_preset(meta_df, output_format, anode):
     }
     values.pop(None, None)
 
+    return set_metadata_rows(meta_df, values)
+
+
+def set_metadata_rows(meta_df, values):
+    """Metadata table with the given {parameter: value} rows set (appended if missing)."""
     df = meta_df.copy()
     for parameter, value in values.items():
         mask = df["Parameter"] == parameter
@@ -76,6 +82,99 @@ def apply_anode_preset(meta_df, output_format, anode):
         else:
             df.loc[len(df)] = [parameter, value]
     return df.reset_index(drop=True)
+
+
+def _number(value):
+    """Leading number of a metadata value ('45 kV' -> '45'), or None."""
+    match = re.match(r'\s*([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)', str(value))
+    return match.group(1) if match else None
+
+
+def _iso_time(value):
+    """ISO timestamp from the formats the parsers return, or None."""
+    text = str(value).strip()
+    for parse in (datetime.fromisoformat,
+                  lambda t: datetime.strptime(t, '%m/%d/%Y %H:%M:%S')):
+        try:
+            return parse(text).isoformat()
+        except ValueError:
+            pass
+    return None
+
+
+def instrument_settings(key_metadata, full_metadata, step=None):
+    """Instrument settings of an uploaded file under format-neutral names.
+
+    Each parser names its fields differently (.xrdml 'X-ray Tube Tension',
+    .ras 'MEAS_COND_XG_VOLTAGE', ...); this collects the ones that every
+    output format can store. Missing or 'N/A' values are left out, so the
+    output table keeps its defaults for them. ``step`` (the 2θ step of the
+    data) converts between a scan speed and a counting time per step.
+    """
+    md = {**(full_metadata or {}), **(key_metadata or {})}
+
+    def first(*keys):
+        for key in keys:
+            value = str(md.get(key, '')).strip()
+            if value and value.upper() != 'N/A':
+                return value
+        return None
+
+    settings = {
+        'anode': first('Anode Material', 'X-ray Target', 'HW_XG_TARGET_NAME'),
+        'ka1': _number(first('K-Alpha1 Wavelength (Å)', 'K-Alpha1 (Å)', 'HW_XG_WAVE_LENGTH_ALPHA1') or ''),
+        'ka2': _number(first('K-Alpha2 Wavelength (Å)', 'K-Alpha2 (Å)', 'HW_XG_WAVE_LENGTH_ALPHA2') or ''),
+        'kb': _number(first('K-Beta Wavelength (Å)', 'K-Beta (Å)', 'HW_XG_WAVE_LENGTH_BETA') or ''),
+        'kv': _number(first('X-ray Tube Tension', 'Voltage (kV)', 'MEAS_COND_XG_VOLTAGE') or ''),
+        'ma': _number(first('X-ray Tube Current', 'Current (mA)', 'MEAS_COND_XG_CURRENT') or ''),
+        'operator': first('Author', 'FILE_OPERATOR'),
+        'start': _iso_time(first('Start Time', 'MEAS_SCAN_START_TIME') or ''),
+        'end': _iso_time(first('End Time', 'MEAS_SCAN_END_TIME') or ''),
+        'time_per_step': _number(first('Time per Step (s)', 'Common Counting Time (s)') or ''),
+        'ds': first('Divergence Slit (DS)'),
+        'ss': first('Scattering Slit (SS)'),
+        'rs': first('Receiving Slit (RS)'),
+    }
+    speed = _number(first('MEAS_SCAN_SPEED') or '')
+    if speed and first('MEAS_SCAN_SPEED_UNIT') not in (None, 'deg/min'):
+        speed = None  # only deg/min can be converted to a time per step
+    if step and step > 0:
+        if speed and not settings['time_per_step'] and float(speed) > 0:
+            settings['time_per_step'] = f"{step / float(speed) * 60:.4g}"
+        elif settings['time_per_step'] and not speed and float(settings['time_per_step']) > 0:
+            speed = f"{step / float(settings['time_per_step']) * 60:.4f}"
+    settings['speed'] = speed
+    return {k: v for k, v in settings.items() if v}
+
+
+# Which table row each setting from instrument_settings() goes to, per output
+# format. Settings a format cannot store are simply not listed.
+SETTINGS_ROWS = {
+    "XRDML": {**ANODE_ROWS["XRDML"],
+              "kv": "X-ray Tube Tension (kV)", "ma": "X-ray Tube Current (mA)",
+              "operator": "Author", "start": "Start Time", "end": "End Time",
+              "time_per_step": "Common Counting Time (s)"},
+    "RAS": {**ANODE_ROWS["RAS"],
+            "kv": "MEAS_COND_XG_VOLTAGE", "ma": "MEAS_COND_XG_CURRENT",
+            "operator": "FILE_OPERATOR", "start": "MEAS_SCAN_START_TIME",
+            "end": "MEAS_SCAN_END_TIME", "speed": "MEAS_SCAN_SPEED",
+            "ds": "Divergence Slit (DS)", "ss": "Scattering Slit (SS)",
+            "rs": "Receiving Slit (RS)"},
+    "RAW": {**ANODE_ROWS["RAW"], "time_per_step": "Time per Step (s)"},
+}
+
+
+def apply_instrument_settings(meta_df, output_format, settings):
+    """Metadata table with the rows filled from an uploaded file's settings."""
+    anode = str(settings.get("anode", "")).capitalize()
+    if anode in ANODE_PRESETS:
+        # A file that names only Kα1 must not keep another anode's Kα2 / Kβ.
+        meta_df = apply_anode_preset(meta_df, output_format, anode)
+    rows = SETTINGS_ROWS.get(output_format, {})
+    values = {rows[k]: v for k, v in settings.items() if k in rows}
+    if output_format == "RAS" and "speed" in settings:
+        values["MEAS_SCAN_SPEED_UNIT"] = "deg/min"
+    return set_metadata_rows(meta_df, values)
 
 
 def run_data_converter():
@@ -277,9 +376,9 @@ def run_data_converter():
 *HW_XG_TARGET_NAME "{meta_dict.get('HW_XG_TARGET_NAME', 'Cu')}"
 *HW_XG_TYPE "Hermetic"
 *HW_XG_VOLTAGE_UNIT "kV"
-*HW_XG_WAVE_LENGTH_ALPHA1 "1.540593"
-*HW_XG_WAVE_LENGTH_ALPHA2 "1.544414"
-*HW_XG_WAVE_LENGTH_BETA "1.392246"
+*HW_XG_WAVE_LENGTH_ALPHA1 "{meta_dict.get('HW_XG_WAVE_LENGTH_ALPHA1', '1.540593')}"
+*HW_XG_WAVE_LENGTH_ALPHA2 "{meta_dict.get('HW_XG_WAVE_LENGTH_ALPHA2', '1.544414')}"
+*HW_XG_WAVE_LENGTH_BETA "{meta_dict.get('HW_XG_WAVE_LENGTH_BETA', '1.392246')}"
 *HW_XG_WAVE_LENGTH_UNIT "Angstrom"
 *MEAS_COND_AXIS_NAME_INTERNAL-0 "ThetaS"
 *MEAS_COND_AXIS_NAME_INTERNAL-1 "ThetaD"
@@ -1032,6 +1131,8 @@ def run_data_converter():
         if format_type == 'RAS':
             metadata = {
                 'FILE_OPERATOR': 'XRDlicious User', 'HW_XG_TARGET_NAME': 'Cu',
+                'HW_XG_WAVE_LENGTH_ALPHA1': '1.540593', 'HW_XG_WAVE_LENGTH_ALPHA2': '1.544414',
+                'HW_XG_WAVE_LENGTH_BETA': '1.392246',
                 'MEAS_COND_XG_VOLTAGE': '40', 'MEAS_COND_XG_CURRENT': '30',
                 'MEAS_SCAN_AXIS_X': 'TwoThetaTheta', 'MEAS_SCAN_MODE': 'CONTINUOUS',
                 'MEAS_SCAN_SPEED': '5.0000', 'MEAS_SCAN_SPEED_UNIT': 'deg/min',
@@ -1075,8 +1176,9 @@ def run_data_converter():
     #    unsafe_allow_html=True
     #)
     st.info(
-        "📄🔁📄 Upload one or more data powder diffraction files to convert them to a different format. .**xy ➡️ .xrdml, .ras, .raw**. "
-        "Or **.xrdml, .ras, .rasx, .raw ➡️ .xy**. \n\n ℹ️ For **.raw** (Bruker) files, please check that the converted "
+        "📄🔁📄 Upload one or more powder diffraction files and convert them to **.xy, .xrdml, .ras or .raw**. "
+        "Accepted input: **.xrdml, .ras, .rasx, .raw** and two-column data (**.xy, .dat, .txt, .csv**) — "
+        "formats may be **mixed** in one upload. \n\n ℹ️ For **.raw** (Bruker) files, please check that the converted "
         "axis values are reasonable. \n\n **Batch mode** is automatically activated when multiple files are uploaded.")
 
     # The uploader key holds a counter. Incrementing it (in the clear button
@@ -1093,31 +1195,64 @@ def run_data_converter():
                                           accept_multiple_files=True,
                                           key=f"file_uploader_{st.session_state.uploader_key}")
 
+    def load_pattern(uploaded_file):
+        """Parse any supported upload into (data_df, key_metadata, full_metadata, x_axis).
+
+        x_axis is only detected for two-column text files (electron-diffraction
+        headers); the instrument formats are always 2θ.
+        """
+        ext = uploaded_file.name.lower().rsplit('.', 1)[-1]
+        if ext == 'raw':
+            key_metadata, df = parse_raw(uploaded_file.getvalue())
+            return df, key_metadata, key_metadata, None
+        if ext == 'rasx':
+            full_metadata, key_metadata, df = parse_rasx(uploaded_file)
+            return df, key_metadata, full_metadata, None
+        text = uploaded_file.getvalue().decode("utf-8", errors='replace')
+        if ext == 'ras':
+            full_metadata, key_metadata, df = parse_ras(text)
+            return df, key_metadata, full_metadata, None
+        if ext in ('xrdml', 'xml'):
+            key_metadata, df = parse_xrdml(text)
+            return df, key_metadata, key_metadata, None
+        return parse_xy(text), {}, {}, detect_x_axis(text)
+
+    def output_names(files, new_ext):
+        """Output filename per upload; with mixed formats, sample.csv and
+        sample.xy would both become sample.<new_ext>, so colliding names keep
+        the source extension (sample_csv.<new_ext>, sample_xy.<new_ext>)."""
+        stems = [f.name.rsplit('.', 1)[0] for f in files]
+        names = []
+        for f, stem in zip(files, stems):
+            if stems.count(stem) > 1:
+                stem = f"{stem}_{f.name.rsplit('.', 1)[-1].lower()}"
+            names.append(f"{stem}.{new_ext}")
+        return names
+
     if uploaded_files_raw:
         if isinstance(uploaded_files_raw, list):
             uploaded_files = uploaded_files_raw
         else:
             uploaded_files = [uploaded_files_raw]
 
-        first_file_ext = uploaded_files[0].name.lower().split('.')[-1]
-        if not all(f.name.lower().split('.')[-1] == first_file_ext for f in uploaded_files):
-            st.error("Error: Please upload files of the same format.")
-            return
+        input_exts = sorted({f.name.lower().rsplit('.', 1)[-1] for f in uploaded_files})
+        formats_label = ", ".join(f"**.{e}**" for e in input_exts)
+        all_instrument = all(e in ('xrdml', 'xml', 'ras', 'rasx', 'raw') for e in input_exts)
 
         msg_col, clear_col = st.columns([4, 1])
         with msg_col:
             if len(uploaded_files) > 1:
                 st.success(
-                    f"✅ Successfully uploaded **{len(uploaded_files)}** files (**.{first_file_ext}** format) - Batch mode activated")
+                    f"✅ Successfully uploaded **{len(uploaded_files)}** files ({formats_label} format) - Batch mode activated")
             else:
-                st.success(f"✅ Successfully uploaded **1** file (**.{first_file_ext}** format)")
+                st.success(f"✅ Successfully uploaded **1** file ({formats_label} format)")
         with clear_col:
             apply_button_style(["remove_all_files_format"])
             st.button("🗑️ Remove all files",
                       key="remove_all_files_format",
                       on_click=_clear_uploaded_files,
                       type="primary",
-                      use_container_width=True)
+                      width="stretch")
 
         # In batch mode the user can pick which file is shown in the preview.
         # The controlling slider is rendered below the preview plot; read its
@@ -1140,315 +1275,329 @@ def run_data_converter():
                 )
 
         first_file = uploaded_files[preview_idx]
-        file_ext = first_file_ext
-        data_df = None
+        file_ext = first_file.name.lower().rsplit('.', 1)[-1]
         is_batch = len(uploaded_files) > 1
-        if file_ext in ['xrdml', 'xml', 'ras', 'rasx', 'raw']:
-            key_metadata = {}
-            full_metadata = {}
-            if file_ext == 'raw':
-                file_content_bytes = first_file.getvalue()
-                key_metadata, data_df = parse_raw(file_content_bytes)
-                full_metadata = key_metadata
-            elif file_ext in ['xrdml', 'xml', 'ras', 'rasx']:
-                if file_ext == 'ras':
-                    file_content = first_file.getvalue().decode("utf-8", errors='replace')
-                    full_metadata, key_metadata, data_df = parse_ras(file_content)
-                elif file_ext == 'rasx':
-                    full_metadata, key_metadata, data_df = parse_rasx(first_file)
+        data_df, key_metadata, full_metadata, x_axis = load_pattern(first_file)
+        if data_df is None:
+            st.error(f"Could not read any data from `{first_file.name}`.")
+            return
+
+        # Electron-diffraction files (e.g. ProcessDiffraction for TEM) declare
+        # a k = 2π/d, s = 1/d or d x-axis in their header. The values are
+        # written to the output unchanged; the header only labels the axis.
+        is_2theta = x_axis is None or x_axis[0] == '2theta'
+        x_label = "2θ (°)" if is_2theta else x_axis[2]
+        u = "°" if is_2theta else ""  # unit appended to step values
+
+        # .xrdml stores only the start/end angle (and .ras/.raw a single
+        # step), so the points must be evenly spaced — otherwise every
+        # intensity ends up at the wrong angle. An irregular x column is
+        # interpolated onto an even grid before export.
+        grid_info = check_regular_grid(data_df)
+        interp_step = None
+
+        def _export_df(df):
+            info = check_regular_grid(df)
+            if info['regular']:
+                return df
+            return resample_to_regular_grid(df, interp_step or info['median_step'])
+
+        col1, col2 = st.columns([1, 1.5])
+        with col1:
+            if key_metadata:
+                st.markdown(f"#### 📝 Key Parameters (from `{first_file.name}`)")
+                st.table(metadata_dataframe(key_metadata))
+
+                if full_metadata and file_ext in ['ras', 'rasx']:
+                    with st.expander("Show Full Raw Header"):
+                        st.dataframe(metadata_dataframe(full_metadata),
+                                     height=300)
+
+            st.markdown("#### 📝 Edit Details for Output File(s)")
+            if is_batch:
+                st.info(f"These settings will be applied to all **{len(uploaded_files)} files**.")
+
+            # Instrument files are mostly converted to .xy, two-column data to
+            # an instrument format, so that is what is preselected.
+            output_format = st.selectbox("Select Output Format", ['XY', 'XRDML', 'RAS', 'RAW'],
+                                         index=0 if all_instrument else 1)
+
+            if output_format == 'XY':
+                include_header = st.checkbox("Include header in .xy file", value=False)
+
+                if is_batch:
+                    st.write(f"**Batch conversion for {len(uploaded_files)} files.**")
+                    zip_filename = st.text_input(
+                        "Enter filename for the .zip download:",
+                        f"converted_xy_files_{timestamp_suffix()}.zip",
+                        key="zip_name_to_xy")
+                    if not zip_filename.lower().endswith('.zip'):
+                        zip_filename += '.zip'
+                    if st.button("📦 Prepare All as .xy for Download (.zip)", type="primary", width='stretch'):
+                        zip_buffer = BytesIO()
+                        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+                            for uploaded_file, new_filename in zip(uploaded_files,
+                                                                   output_names(uploaded_files, 'xy')):
+                                df_to_convert = load_pattern(uploaded_file)[0]
+                                if df_to_convert is not None:
+                                    zf.writestr(new_filename, convert_to_xy(df_to_convert, include_header))
+
+                        st.download_button(
+                            label="📦 Download ZIP",
+                            data=zip_buffer.getvalue(),
+                            file_name=zip_filename,
+                            mime="application/zip",
+                            width='stretch',
+                            on_click=log_download,
+                            args=("File Format Converter",),
+                        )
                 else:
-                    file_content = first_file.getvalue().decode("utf-8", errors='replace')
-                    key_metadata, data_df = parse_xrdml(file_content)
-                    full_metadata = key_metadata
+                    default_name = first_file.name.rsplit('.', 1)[0] + '.xy'
+                    download_filename = st.text_input("Enter filename for download:", default_name)
+                    xy_data = convert_to_xy(data_df, include_header)
+                    st.download_button("⬇️ Download as .xy File", xy_data, download_filename, "text/plain",
+                                       type="primary", width='stretch',
+                                       on_click=log_download,
+                                       args=("File Format Converter",))
+            else:
+                if not is_2theta:
+                    st.info(
+                        f"ℹ️ The header of `{first_file.name}` declares the x-axis as "
+                        f"**{x_axis[2]}** (e.g. TEM electron diffraction). The x values are "
+                        f"kept unchanged in the output file.")
+                if not grid_info['regular']:
+                    interp_step = st.number_input(
+                        f"Step for interpolation{' (°)' if is_2theta else ''}",
+                        min_value=1e-6,
+                        value=float(f"{grid_info['median_step']:.6g}"),
+                        step=float(f"{grid_info['median_step'] / 10:.2g}"),
+                        format="%.6f",
+                        key=f"xy_interp_step_{st.session_state.uploader_key}",
+                        help="Spacing of the regular grid written to the output file. "
+                             "Defaults to the median step of the data. In batch mode "
+                             "it is used for every file whose grid is irregular.")
 
-            if data_df is not None:
-                col1, col2 = st.columns([1, 1.5])
-                with col1:
-                    st.markdown(f"#### 📝 Key Parameters (from `{first_file.name}`)")
-                    st.table(metadata_dataframe(key_metadata))
+                # The table is prefilled with the instrument settings (anode,
+                # wavelengths, tube, operator, times, ...) of the first uploaded
+                # file that has any; two-column files carry none.
+                source_file, source_settings = None, {}
+                for f in uploaded_files:
+                    if f.name.lower().rsplit('.', 1)[-1] not in ('xrdml', 'xml', 'ras', 'rasx', 'raw'):
+                        continue
+                    df_, key_, full_, _ = (load_pattern(f) if f is not first_file
+                                           else (data_df, key_metadata, full_metadata, None))
+                    if df_ is not None and key_:
+                        source_file = f
+                        source_settings = instrument_settings(
+                            key_, full_, check_regular_grid(df_)['median_step'])
+                        break
 
-                    if full_metadata and file_ext in ['ras', 'rasx']:
-                        with st.expander("Show Full Raw Header"):
-                            st.dataframe(metadata_dataframe(full_metadata),
-                                         height=300)
+                # The anode is offered as a one-click setting instead of four
+                # values typed into the table below. It starts from the anode
+                # of the uploaded files, and falls back to Cu for .xy files.
+                # The key follows the uploads, so new files reset it. The choice
+                # is also kept outside the widget: with XY output the widget is
+                # not shown, and Streamlit then forgets its value.
+                upload_names = tuple(f.name for f in uploaded_files)
+                upload_sig = f"{st.session_state.uploader_key}_{abs(hash(upload_names))}"
+                source_anode = source_settings.get('anode', '').capitalize()
+                anode_options = list(ANODE_PRESETS)
+                anode_pref_key = f"anode_pref_{upload_sig}"
+                default_anode = st.session_state.get(anode_pref_key, source_anode)
+                anode_choice = st.selectbox(
+                    "Quick setting: X-ray source",
+                    anode_options,
+                    index=anode_options.index(default_anode) if default_anode in anode_options else 0,
+                    key=f"anode_quick_choice_{upload_sig}",
+                    help="Fills the anode and wavelength rows of the "
+                         "table below with the characteristic values of "
+                         "the chosen tube — only the rows the selected "
+                         "output format knows.",
+                )
+                st.session_state[anode_pref_key] = anode_choice
 
-                    include_header = st.checkbox("Include header in .xy file", value=False)
+                # Metadata settings apply to all uploaded files, so key the
+                # table state by output format only (not the previewed file)
+                # — switching the preview file then keeps the edited values.
+                df_state_key = f"meta_df_{output_format}"
+                # Tracks whether the user has clicked "Apply Changes" for the
+                # current output format; the download section only appears once
+                # this is True.
+                applied_key = f"meta_applied_{output_format}"
+                anode_state_key = f"meta_anode_{output_format}"
+                editor_ver_key = f"meta_editor_ver_{output_format}"
 
+                def _bump_editor():
+                    # The editor keeps its own copy of the edits, so it is
+                    # rebuilt under a new key to show the filled-in values.
+                    st.session_state[editor_ver_key] = int(
+                        st.session_state.get(editor_ver_key, 0)) + 1
+
+                # Rebuilt for a new output format or new uploads: defaults, then
+                # the settings of the uploaded file, then the quick setting if
+                # the user picked another anode than the file has (so it is not
+                # lost on a format switch).
+                table_sig = (output_format, upload_sig)
+                if st.session_state.get('meta_table_source') != table_sig:
+                    table = apply_instrument_settings(
+                        get_default_metadata(output_format), output_format, source_settings)
+                    if anode_choice in ANODE_PRESETS and anode_choice != source_anode:
+                        table = apply_anode_preset(table, output_format, anode_choice)
+                    st.session_state[df_state_key] = table
+                    st.session_state[anode_state_key] = anode_choice
+                    st.session_state[applied_key] = False
+                    st.session_state['meta_table_source'] = table_sig
+                    _bump_editor()
+
+                # A later change of the quick setting overwrites the anode and
+                # wavelength rows (also those taken over from the file).
+                if (anode_choice in ANODE_PRESETS
+                        and st.session_state.get(anode_state_key) != anode_choice):
+                    st.session_state[df_state_key] = apply_anode_preset(
+                        st.session_state[df_state_key], output_format, anode_choice)
+                    st.session_state[anode_state_key] = anode_choice
+                    st.session_state[applied_key] = False
+                    _bump_editor()
+
+                if source_file is not None:
+                    st.caption(f"📋 Prefilled with the instrument settings of `{source_file.name}`.")
+                keep_own_settings = False
+                if is_batch and source_file is not None:
+                    keep_own_settings = st.checkbox(
+                        "Keep each file's own instrument settings", value=True,
+                        key=f"keep_own_settings_{upload_sig}",
+                        help="Files that carry instrument settings (.xrdml, .ras, .rasx, "
+                             ".raw) keep their own anode, wavelengths, tube voltage and "
+                             "current, operator, times, counting time / scan speed and "
+                             "slits in the output. The table then supplies only what a "
+                             "file does not have, and everything for two-column files.")
+
+                st.caption("✏️ All values in the table below can be edited.")
+
+                edited_df = st.data_editor(
+                    st.session_state[df_state_key], num_rows="dynamic", height=425,
+                    key=f"editor_{output_format}_v"
+                        f"{st.session_state.get(editor_ver_key, 0)}")
+
+                if st.button("Apply Changes & Prepare Download", type="primary", width='stretch'):
+                    st.session_state[df_state_key] = edited_df
+                    st.session_state[applied_key] = True
+                    st.success(f"Settings applied. {output_format} file is ready for download below.")
+
+                file_extensions = {'XRDML': 'xrdml', 'RAS': 'ras', 'RAW': 'raw'}
+                file_extension = file_extensions.get(output_format, 'txt')
+
+                if st.session_state.get(applied_key):
+                    applied_metadata_df = st.session_state[df_state_key]
                     if is_batch:
-                        st.write(f"**Batch conversion for {len(uploaded_files)} files.**")
                         zip_filename = st.text_input(
                             "Enter filename for the .zip download:",
-                            f"converted_xy_files_{timestamp_suffix()}.zip",
-                            key="zip_name_to_xy")
+                            f"converted_to_{output_format}_{timestamp_suffix()}.zip",
+                            key=f"zip_name_from_xy_{output_format}")
                         if not zip_filename.lower().endswith('.zip'):
                             zip_filename += '.zip'
-                        if st.button("📦 Prepare All as .xy for Download (.zip)", type="primary", width='stretch'):
-                            zip_buffer = BytesIO()
-                            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
-                                for uploaded_file in uploaded_files:
-                                    df_to_convert = None
-                                    if file_ext == 'raw':
-                                        _, df_to_convert = parse_raw(uploaded_file.getvalue())
-                                    elif file_ext == 'ras':
-                                        _, _, df_to_convert = parse_ras(
-                                            uploaded_file.getvalue().decode("utf-8", errors='replace'))
-                                    elif file_ext == 'rasx':
-                                        _, _, df_to_convert = parse_rasx(uploaded_file)
-                                    else:
-                                        _, df_to_convert = parse_xrdml(
-                                            uploaded_file.getvalue().decode("utf-8", errors='replace'))
+                        zip_buffer = BytesIO()
+                        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+                            for uploaded_file, new_filename in zip(uploaded_files,
+                                                                   output_names(uploaded_files, file_extension)):
+                                df_to_convert, key_, full_, _ = load_pattern(uploaded_file)
+                                if df_to_convert is not None:
+                                    file_metadata_df = applied_metadata_df
+                                    if keep_own_settings and key_:
+                                        file_metadata_df = apply_instrument_settings(
+                                            applied_metadata_df, output_format, instrument_settings(
+                                                key_, full_, check_regular_grid(df_to_convert)['median_step']))
+                                    df_to_convert = _export_df(df_to_convert)
+                                    file_content_to_download = None
+                                    if output_format == 'RAS':
+                                        file_content_to_download = generate_ras(file_metadata_df, df_to_convert)
+                                    elif output_format == 'XRDML':
+                                        file_content_to_download = generate_xrdml(file_metadata_df,
+                                                                                  df_to_convert,
+                                                                                  filename=uploaded_file.name)
+                                    elif output_format == 'RAW':
+                                        file_content_to_download = generate_raw(file_metadata_df, df_to_convert)
 
-                                    if df_to_convert is not None:
-                                        new_filename = uploaded_file.name.rsplit('.', 1)[0] + '.xy'
-                                        xy_data = convert_to_xy(df_to_convert, include_header)
-                                        zf.writestr(new_filename, xy_data)
+                                    if file_content_to_download:
+                                        zf.writestr(new_filename, file_content_to_download)
 
-                            st.download_button(
-                                label="📦 Download ZIP",
-                                data=zip_buffer.getvalue(),
-                                file_name=zip_filename,
-                                mime="application/zip",
-                                width='stretch',
-                                on_click=log_download,
-                                args=("File Format Converter",),
-                            )
-                    else:
-                        default_name = first_file.name.rsplit('.', 1)[0] + '.xy'
-                        download_filename = st.text_input("Enter filename for download:", default_name)
-                        xy_data = convert_to_xy(data_df, include_header)
-                        st.download_button("⬇️ Download as .xy File", xy_data, download_filename, "text/plain",
-                                           type="primary", width='stretch',
-                                           on_click=log_download,
-                                           args=("File Format Converter",))
-
-                with col2:
-                    st.markdown("#### 📈 Diffraction Pattern")
-                    fig = go.Figure(
-                        go.Scatter(x=data_df['2Theta'], y=data_df['Intensity'], mode='lines', name='Intensity'))
-                    fig.update_layout(
-                        title=dict(text=f"Data from {first_file.name}", font=dict(size=24)),
-                        xaxis_title="2θ (°)", yaxis_title="Intensity (counts)",
-                        height=550, margin=dict(l=40, r=40, t=60, b=40),
-                        font=dict(size=18),
-                        xaxis=dict(title_font=dict(size=22), tickfont=dict(size=16)),
-                        yaxis=dict(title_font=dict(size=22), tickfont=dict(size=16)),
-                        legend=dict(font=dict(size=18)))
-                    st.plotly_chart(fig, width='stretch')
-                    _render_preview_file_slider()
-
-
-        elif file_ext in ['xy', 'dat', 'txt', 'csv']:
-            file_content = first_file.getvalue().decode("utf-8", errors='replace')
-            data_df = parse_xy(file_content)
-            # Electron-diffraction files (e.g. ProcessDiffraction for TEM) declare
-            # a k = 2π/d, s = 1/d or d x-axis in their header. The values are
-            # written to the output unchanged; the header only labels the axis.
-            x_axis = detect_x_axis(file_content)
-            is_2theta = x_axis is None or x_axis[0] == '2theta'
-            x_label = "2θ (°)" if is_2theta else x_axis[2]
-            u = "°" if is_2theta else ""  # unit appended to step values
-
-            if data_df is not None:
-                # .xrdml stores only the start/end angle (and .ras/.raw a single
-                # step), so the points must be evenly spaced — otherwise every
-                # intensity ends up at the wrong angle. An irregular x column is
-                # interpolated onto an even grid before export.
-                grid_info = check_regular_grid(data_df)
-                interp_step = None
-
-                def _export_df(df):
-                    info = check_regular_grid(df)
-                    if info['regular']:
-                        return df
-                    return resample_to_regular_grid(df, interp_step or info['median_step'])
-
-                col1, col2 = st.columns([1, 1.5])
-                with col1:
-                    st.markdown("#### 📝 Edit Details for Output File(s)")
-                    if is_batch:
-                        st.info(f"These settings will be applied to all **{len(uploaded_files)} files**.")
-                    if not is_2theta:
-                        st.info(
-                            f"ℹ️ The header of `{first_file.name}` declares the x-axis as "
-                            f"**{x_axis[2]}** (e.g. TEM electron diffraction). The x values are "
-                            f"kept unchanged in the output file.")
-                    if not grid_info['regular']:
-                        interp_step = st.number_input(
-                            f"Step for interpolation{' (°)' if is_2theta else ''}",
-                            min_value=1e-6,
-                            value=float(f"{grid_info['median_step']:.6g}"),
-                            step=float(f"{grid_info['median_step'] / 10:.2g}"),
-                            format="%.6f",
-                            key=f"xy_interp_step_{st.session_state.uploader_key}",
-                            help="Spacing of the regular grid written to the output file. "
-                                 "Defaults to the median step of the data. In batch mode "
-                                 "it is used for every file whose grid is irregular.")
-                    fmt_col, anode_col = st.columns(2)
-                    with fmt_col:
-                        output_format = st.selectbox("Select Output Format", ['XRDML', 'RAS', 'RAW'])
-                    with anode_col:
-                        # A .xy file has no instrument information, so the anode
-                        # is offered as a one-click setting instead of four
-                        # values typed into the table below.
-                        anode_choice = st.selectbox(
-                            "Quick setting: X-ray source",
-                            list(ANODE_PRESETS),
-                            key="anode_quick_choice",
-                            help="Fills the anode and wavelength rows of the "
-                                 "table below with the characteristic values of "
-                                 "the chosen tube — only the rows the selected "
-                                 "output format knows (a .ras file stores the "
-                                 "target name only).",
+                        st.download_button(
+                            label=f"📦 Download All as {output_format} (.zip)",
+                            data=zip_buffer.getvalue(),
+                            file_name=zip_filename,
+                            mime="application/zip",
+                            type="primary",
+                            width='stretch',
+                            on_click=log_download,
+                            args=("File Format Converter",),
                         )
+                    else:
+                        default_name = first_file.name.rsplit('.', 1)[0] + f'.{file_extension}'
+                        download_filename = st.text_input("Enter filename for download:", default_name)
 
-                    # Metadata settings apply to all uploaded files, so key the
-                    # table state by output format only (not the previewed file)
-                    # — switching the preview file then keeps the edited values.
-                    df_state_key = f"meta_df_{output_format}"
-                    # Tracks whether the user has clicked "Apply Changes" for the
-                    # current output format; the download section only appears once
-                    # this is True.
-                    applied_key = f"meta_applied_{output_format}"
-                    if st.session_state.get('last_file_format_choice') != output_format:
-                        st.session_state[df_state_key] = get_default_metadata(output_format)
-                        st.session_state[applied_key] = False
-                        st.session_state['last_file_format_choice'] = output_format
+                        file_content_to_download = None
+                        mime_type = 'application/octet-stream'
+                        export_df = _export_df(data_df)
+                        if output_format == 'RAS':
+                            file_content_to_download = generate_ras(applied_metadata_df, export_df)
+                            mime_type = 'text/plain'
+                        elif output_format == 'XRDML':
+                            file_content_to_download = generate_xrdml(applied_metadata_df, export_df,
+                                                                      filename=first_file.name)
+                            mime_type = 'application/xml'
+                        elif output_format == 'RAW':
+                            file_content_to_download = generate_raw(applied_metadata_df, export_df)
 
-                    # The preset is written into the table whenever the choice
-                    # changes, and again after a format switch (it is tracked per
-                    # format), so the rows of the newly selected format are filled
-                    # as well.
-                    anode_state_key = f"meta_anode_{output_format}"
-                    editor_ver_key = f"meta_editor_ver_{output_format}"
-                    if (anode_choice in ANODE_PRESETS
-                            and st.session_state.get(anode_state_key) != anode_choice):
-                        st.session_state[df_state_key] = apply_anode_preset(
-                            st.session_state[df_state_key], output_format, anode_choice)
-                        st.session_state[anode_state_key] = anode_choice
-                        st.session_state[applied_key] = False
-                        # The editor keeps its own copy of the edits, so it is
-                        # rebuilt under a new key to show the filled-in values.
-                        st.session_state[editor_ver_key] = int(
-                            st.session_state.get(editor_ver_key, 0)) + 1
-
-                    st.caption("✏️ All values in the table below can be edited.")
-
-                    edited_df = st.data_editor(
-                        st.session_state[df_state_key], num_rows="dynamic", height=425,
-                        key=f"editor_{output_format}_v"
-                            f"{st.session_state.get(editor_ver_key, 0)}")
-
-                    if st.button("Apply Changes & Prepare Download", type="primary", width='stretch'):
-                        st.session_state[df_state_key] = edited_df
-                        st.session_state[applied_key] = True
-                        st.success(f"Settings applied. {output_format} file is ready for download below.")
-
-                    file_extensions = {'XRDML': 'xrdml', 'RAS': 'ras', 'RAW': 'raw'}
-                    file_extension = file_extensions.get(output_format, 'txt')
-
-                    if st.session_state.get(applied_key):
-                        applied_metadata_df = st.session_state[df_state_key]
-                        if is_batch:
-                            zip_filename = st.text_input(
-                                "Enter filename for the .zip download:",
-                                f"converted_to_{output_format}_{timestamp_suffix()}.zip",
-                                key=f"zip_name_from_xy_{output_format}")
-                            if not zip_filename.lower().endswith('.zip'):
-                                zip_filename += '.zip'
-                            zip_buffer = BytesIO()
-                            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
-                                for uploaded_file in uploaded_files:
-                                    df_to_convert = parse_xy(uploaded_file.getvalue().decode("utf-8", errors='replace'))
-                                    if df_to_convert is not None:
-                                        df_to_convert = _export_df(df_to_convert)
-                                        new_filename = uploaded_file.name.rsplit('.', 1)[0] + f'.{file_extension}'
-                                        file_content_to_download = None
-                                        if output_format == 'RAS':
-                                            file_content_to_download = generate_ras(applied_metadata_df, df_to_convert)
-                                        elif output_format == 'XRDML':
-                                            file_content_to_download = generate_xrdml(applied_metadata_df,
-                                                                                      df_to_convert,
-                                                                                      filename=uploaded_file.name)
-                                        elif output_format == 'RAW':
-                                            file_content_to_download = generate_raw(applied_metadata_df, df_to_convert)
-
-                                        if file_content_to_download:
-                                            zf.writestr(new_filename, file_content_to_download)
-
+                        if file_content_to_download:
                             st.download_button(
-                                label=f"📦 Download All as {output_format} (.zip)",
-                                data=zip_buffer.getvalue(),
-                                file_name=zip_filename,
-                                mime="application/zip",
+                                label=f"⬇️ Download as .{file_extension}",
+                                data=file_content_to_download,
+                                file_name=download_filename,
+                                mime=mime_type,
                                 type="primary",
                                 width='stretch',
                                 on_click=log_download,
                                 args=("File Format Converter",),
                             )
-                        else:
-                            default_name = first_file.name.rsplit('.', 1)[0] + f'.{file_extension}'
-                            download_filename = st.text_input("Enter filename for download:", default_name)
 
-                            file_content_to_download = None
-                            mime_type = 'application/octet-stream'
-                            export_df = _export_df(data_df)
-                            if output_format == 'RAS':
-                                file_content_to_download = generate_ras(applied_metadata_df, export_df)
-                                mime_type = 'text/plain'
-                            elif output_format == 'XRDML':
-                                file_content_to_download = generate_xrdml(applied_metadata_df, export_df,
-                                                                          filename=first_file.name)
-                                mime_type = 'application/xml'
-                            elif output_format == 'RAW':
-                                file_content_to_download = generate_raw(applied_metadata_df, export_df)
-
-                            if file_content_to_download:
-                                st.download_button(
-                                    label=f"⬇️ Download as .{file_extension}",
-                                    data=file_content_to_download,
-                                    file_name=download_filename,
-                                    mime=mime_type,
-                                    type="primary",
-                                    width='stretch',
-                                    on_click=log_download,
-                                    args=("File Format Converter",),
-                                )
-
-                with col2:
-                    st.markdown("#### 📈 Diffraction Pattern")
-                    if grid_info['regular']:
-                        fig = go.Figure(
-                            go.Scatter(x=data_df['2Theta'], y=data_df['Intensity'], mode='lines', name='Intensity'))
-                    else:
-                        preview_df = _export_df(data_df)
-                        out_info = check_regular_grid(preview_df)
-                        fig = go.Figure([
-                            go.Scatter(x=data_df['2Theta'], y=data_df['Intensity'], mode='markers',
-                                       name='Original data', marker=dict(size=6, color='rgba(120,120,120,0.6)')),
-                            go.Scatter(x=preview_df['2Theta'], y=preview_df['Intensity'], mode='lines',
-                                       name=f'Interpolated (exported, step {out_info["implied_step"]:.6g}{u})'),
-                        ])
-                        st.caption(
-                            f"Exported grid: {preview_df['2Theta'].iloc[0]:.6g}{u} → "
-                            f"{preview_df['2Theta'].iloc[-1]:.6g}{u}, step {out_info['implied_step']:.6g}{u}, "
-                            f"{len(preview_df)} points (original: {len(data_df)} points).")
-                    fig.update_layout(
-                        title=dict(text=f"Data from {first_file.name}", font=dict(size=24)),
-                        xaxis_title=x_label, yaxis_title="Intensity",
-                        height=550, margin=dict(l=40, r=40, t=60, b=40),
-                        font=dict(size=18),
-                        xaxis=dict(title_font=dict(size=22), tickfont=dict(size=16)),
-                        yaxis=dict(title_font=dict(size=22), tickfont=dict(size=16)),
-                        legend=dict(font=dict(size=18)))
-                    st.plotly_chart(fig, width='stretch')
-                    if not grid_info['regular']:
-                        st.warning(
-                            f"⚠️ The x column of `{first_file.name}` is **not evenly spaced** "
-                            f"(steps from {grid_info['min_step']:.5g}{u} to {grid_info['max_step']:.5g}{u}, "
-                            f"median {grid_info['median_step']:.5g}{u}). The output formats assume a "
-                            f"constant step, so the data will be **linearly interpolated** onto a "
-                            f"regular grid before export (shown in the chart).")
-                    _render_preview_file_slider()
+        with col2:
+            st.markdown("#### 📈 Diffraction Pattern")
+            # The interpolation only happens for the instrument formats; a .xy
+            # output keeps the points as they are.
+            show_interp = output_format != 'XY' and not grid_info['regular']
+            if not show_interp:
+                fig = go.Figure(
+                    go.Scatter(x=data_df['2Theta'], y=data_df['Intensity'], mode='lines', name='Intensity'))
+            else:
+                preview_df = _export_df(data_df)
+                out_info = check_regular_grid(preview_df)
+                fig = go.Figure([
+                    go.Scatter(x=data_df['2Theta'], y=data_df['Intensity'], mode='markers',
+                               name='Original data', marker=dict(size=6, color='rgba(120,120,120,0.6)')),
+                    go.Scatter(x=preview_df['2Theta'], y=preview_df['Intensity'], mode='lines',
+                               name=f'Interpolated (exported, step {out_info["implied_step"]:.6g}{u})'),
+                ])
+                st.caption(
+                    f"Exported grid: {preview_df['2Theta'].iloc[0]:.6g}{u} → "
+                    f"{preview_df['2Theta'].iloc[-1]:.6g}{u}, step {out_info['implied_step']:.6g}{u}, "
+                    f"{len(preview_df)} points (original: {len(data_df)} points).")
+            fig.update_layout(
+                title=dict(text=f"Data from {first_file.name}", font=dict(size=24)),
+                xaxis_title=x_label, yaxis_title="Intensity",
+                height=550, margin=dict(l=40, r=40, t=60, b=40),
+                font=dict(size=18),
+                xaxis=dict(title_font=dict(size=22), tickfont=dict(size=16)),
+                yaxis=dict(title_font=dict(size=22), tickfont=dict(size=16)),
+                legend=dict(font=dict(size=18)))
+            st.plotly_chart(fig, width='stretch')
+            if show_interp:
+                st.warning(
+                    f"⚠️ The x column of `{first_file.name}` is **not evenly spaced** "
+                    f"(steps from {grid_info['min_step']:.5g}{u} to {grid_info['max_step']:.5g}{u}, "
+                    f"median {grid_info['median_step']:.5g}{u}). The output formats assume a "
+                    f"constant step, so the data will be **linearly interpolated** onto a "
+                    f"regular grid before export (shown in the chart).")
+            _render_preview_file_slider()
 
 
 import streamlit.components.v1 as components
@@ -1464,7 +1613,8 @@ def _logo_data_uri(relative_path):
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), relative_path)
     try:
         with open(path, 'rb') as fh:
-            return "data:image/png;base64," + base64.b64encode(fh.read()).decode('ascii')
+            mime = "image/svg+xml" if path.endswith(".svg") else "image/png"
+            return f"data:{mime};base64," + base64.b64encode(fh.read()).decode('ascii')
     except OSError:
         return None
 
@@ -1479,7 +1629,7 @@ def display_conversion_visual():
                 <div style="display: flex; flex-direction: column; align-items: center;">
                     <div style="background: linear-gradient(135deg, #74b9ff, #0984e3); color: white; padding: 14px 14px; border-radius: 9px; box-shadow: 0 3px 9px rgba(116, 185, 255, 0.4); margin: 4px; min-width: 104px; text-align: center;">
                         <div style="font-size: 1.15em; font-weight: bold; margin-bottom: 4px;">.xy</div>
-                        <div style="font-size: 0.8em; opacity: 0.9;">Generic XY Data</div>
+                        <div style="font-size: 0.8em; opacity: 0.9;">.dat, .txt, .csv<br>(two-column)</div>
                     </div>
                 </div>
                 <div style="display: flex; flex-direction: column; align-items: center;">
@@ -1506,6 +1656,50 @@ def display_conversion_visual():
 
     with col_ad:
         display_ecm36_ad()
+
+
+# GitHub mark (Octicons "mark-github", MIT license), same as in XRDlicious.
+# Inherits the text color and size of the surrounding line.
+GITHUB_ICON = (
+    '<svg viewBox="0 0 16 16" width="1em" height="1em" fill="currentColor" '
+    'aria-hidden="true" style="vertical-align:-0.125em;margin-right:0.25em;">'
+    '<path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17'
+    '-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65'
+    '-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64'
+    '-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1'
+    '-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2'
+    '-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27'
+    '.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21'
+    '-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>'
+)
+
+
+# (name, website, logo file, logo height in px)
+SUPPORTERS = [
+    ("FZU – Institute of Physics of the Czech Academy of Sciences",
+     "https://www.fzu.cz/en", "images/fzu_logo.svg", 34),
+    ("IMPLANT group", "https://implant.fs.cvut.cz/", "images/implant_logo.png", 44),
+]
+
+
+def display_supporters():
+    """Supporter logos at the bottom of the sidebar, same block as in XRDlicious."""
+    logos = []
+    for name, url, relative_path, height in SUPPORTERS:
+        logo = _logo_data_uri(relative_path)
+        if not logo:
+            continue
+        logos.append(
+            f'<a href="{url}" target="_blank" title="{name}">'
+            f'<img src="{logo}" alt="{name}" style="height:{height}px;width:auto;"></a>')
+    st.sidebar.markdown("---")
+    st.sidebar.markdown(
+        '<div style="font-size:0.85em;opacity:0.8;margin:6px 0;">'
+        '<b>FZU</b> and the <b>IMPLANT group</b></div>'
+        '<div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">'
+        + "".join(logos) + '</div>',
+        unsafe_allow_html=True,
+    )
 
 
 # GoatCounter endpoint for the outbound clicks on the ECM-36 banner. Not a
@@ -1546,7 +1740,7 @@ def display_ecm36_ad():
     # The iframe carries none of the app's styling, so the font and the reset
     # are repeated here; the body padding keeps the card's shadow from being
     # clipped at the frame edge.
-    components.html(f"""
+    card_html = f"""
     <style>
         html, body {{ margin: 0; padding: 0; background: transparent;
                       font-family: "Source Sans Pro", "Segoe UI", system-ui, -apple-system, sans-serif; }}
@@ -1634,7 +1828,13 @@ def display_ecm36_ad():
                 new ResizeObserver(fit).observe(document.getElementById('ecm36-card'));
         }})();
     </script>
-    """, height=520, scrolling=False)
+    """
+    # st.iframe replaces components.html (deprecated, slated for removal) from
+    # newer Streamlit on; the fallback keeps older versions working.
+    if hasattr(st, "iframe"):
+        st.iframe(card_html, alt="ECM-36 conference announcement")
+    else:
+        components.html(card_html, height=520, scrolling=False)
 
 
 if __name__ == "__main__":
@@ -1733,12 +1933,22 @@ if __name__ == "__main__":
     st.markdown(css, unsafe_allow_html=True)
 
     st.sidebar.title("XRD Converter Tools")
-    st.sidebar.caption("**v0.8.4** — 2026-10-29")
-    st.sidebar.info(
-        "Visit also main app here: **[XRDlicious](https://xrdlicious.com)**. 🌀 Developed by **[IMPLANT team](https://implant.fs.cvut.cz/)**. "
-        "**[Tutorial here](https://youtu.be/KwxVKadPZ6s?si=S1_67xF5J3sI7n69)**. Spot a bug or have a feature idea? Let us know at: "
-        "**lebedmi2@cvut.cz**. To compile the app locally, visit our **[GitHub page](https://github.com/bracerino/xrd-file-converter)**. "
-        "If you like the app, please cite **[article in IUCr](https://journals.iucr.org/j/issues/2025/05/00/hat5006/index.html).**"
+    st.sidebar.caption("**v0.9.0** — 2026-11-15")
+    # Same look as st.info, written in HTML so the GitHub icon can be inlined.
+    st.sidebar.markdown(
+        '<div style="background-color:rgba(28,131,225,0.1);color:rgb(0,66,128);'
+        'border-radius:8px;padding:16px;line-height:1.6;margin-bottom:1rem;">'
+        'Visit also main app here: <a href="https://xrdlicious.com" target="_blank"><b>XRDlicious</b></a>. '
+        '🌀 Developed by <a href="https://implant.fs.cvut.cz/" target="_blank"><b>IMPLANT team</b></a>. '
+        '<a href="https://youtu.be/KwxVKadPZ6s?si=S1_67xF5J3sI7n69" target="_blank"><b>Tutorial here</b></a>. '
+        'Spot a bug or have a feature idea? Let us know at: <b>lebedmi2@cvut.cz</b>. '
+        'To compile the app locally, visit our '
+        '<a href="https://github.com/bracerino/xrd-file-converter" target="_blank" style="white-space:nowrap;">'
+        f'{GITHUB_ICON}<b>GitHub page</b></a>. '
+        'If you like the app, please cite 📖 '
+        '<a href="https://journals.iucr.org/j/issues/2025/05/00/hat5006/index.html" target="_blank">'
+        '<b>article in IUCr</b></a>.</div>',
+        unsafe_allow_html=True,
     )
     st.sidebar.title("Select between format and X/Y-Axis Conversion")
     tool_choice = st.sidebar.radio(
@@ -1815,3 +2025,5 @@ if __name__ == "__main__":
         st.sidebar.caption(caption + ".")
     except Exception:
         pass
+
+    display_supporters()

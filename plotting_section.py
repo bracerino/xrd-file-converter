@@ -167,10 +167,16 @@ def _default_y_label(normalization, stacked):
 def run_plotting_section():
     apply_button_style(["remove_all_files_plot"])
 
+    st.markdown("### 📈 Plotting")
+    with st.expander("How to **Cite**", icon="📚", expanded=False):
+        st.markdown("""
+        If you like the app, please cite the following source:
+        - **XRDlicious, 2025** – [Lebeda, Miroslav, et al. XRDlicious: an interactive web-based platform for online calculation of diffraction patterns and radial distribution functions from crystal structures. Journal of Applied Crystallography, 2025, 58.5.](https://doi.org/10.1107/S1600576725005370).
+        """)
+
     st.info(
         "📈 Upload **one or more** diffraction patterns and compare them in one interactive plot. "
-        "Supported: **.xy, .dat, .txt, .csv, .xrdml, .ras, .rasx, .raw** — and unlike the converter, "
-        "you may **mix formats** in a single plot.\n\n"
+        "Supported: **.xy, .dat, .txt, .csv, .xrdml, .ras, .rasx, .raw**.\n\n"
         "📚 With two or more files the curves are **stacked automatically**; use the *Gap* slider to "
         "spread them out, or switch stacking off to overlay them."
     )

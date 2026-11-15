@@ -82,6 +82,8 @@ def parse_xrdml(file_content):
             'K-Alpha1 Wavelength (Å)': find_text('xrd:xrdMeasurement/xrd:usedWavelength/xrd:kAlpha1'),
             'Detector': find_attrib('xrd:xrdMeasurement/xrd:diffractedBeamPath/xrd:detector', 'name'),
             'Scan Axis': find_attrib('xrd:xrdMeasurement/xrd:scan', 'scanAxis'),
+            'Common Counting Time (s)': find_text(
+                'xrd:xrdMeasurement/xrd:scan/xrd:dataPoints/xrd:commonCountingTime'),
         }
         data_points_path = 'xrd:xrdMeasurement/xrd:scan/xrd:dataPoints'
         start_pos_2theta = float(find_text(f'{data_points_path}/xrd:positions[@axis="2Theta"]/xrd:startPosition'))
@@ -477,7 +479,11 @@ def parse_raw_v4(file_content_bytes):
         if metadata['Start Angle (°)'] == 'N/A' or metadata['Step Size (°)'] == 'N/A': return metadata, None
 
         intensities = np.frombuffer(file_content_bytes, dtype=np.float32, count=num_points, offset=data_offset)
-        angles = np.arange(num_points) * float(metadata['Step Size (°)']) + float(metadata['Start Angle (°)'])
+        # The metadata strings are rounded to 4 decimals for display; building
+        # the axis from them drifts the angles for steps like 0.0264134°.
+        start = struct.unpack_from('<f', file_content_bytes, offset=136)[0]
+        step = struct.unpack_from('<f', file_content_bytes, offset=140)[0]
+        angles = np.arange(num_points) * step + start
         data_df = pd.DataFrame({'2Theta': angles, 'Intensity': intensities})
 
         return metadata, data_df
