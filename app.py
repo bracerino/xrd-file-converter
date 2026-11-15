@@ -9,15 +9,15 @@ import re
 import zipfile
 import struct
 
-from xrd_conversion import run_axis_converter, convert_xaxis_data, get_axis_label, timestamp_suffix
-from chi_scan_section import run_chi_scan_section
-from chi_merge_section import run_chi_merge_section
-from plotting_section import run_plotting_section
-from data_reduction_section import run_data_reduction_section
-from image_digitizer_section import run_image_digitizer_section
-from download_log import log_download
-from ui_style import apply_button_style
-from xrd_parsers import (extract_key_ras_metadata, metadata_dataframe,
+from more_funct.xrd_conversion import run_axis_converter, convert_xaxis_data, get_axis_label, timestamp_suffix
+from more_funct.chi_scan_section import run_chi_scan_section
+from more_funct.chi_merge_section import run_chi_merge_section
+from more_funct.plotting_section import run_plotting_section
+from more_funct.data_reduction_section import run_data_reduction_section
+from more_funct.image_digitizer_section import run_image_digitizer_section
+from more_funct.download_log import log_download
+from more_funct.ui_style import apply_button_style
+from more_funct.xrd_parsers import (extract_key_ras_metadata, metadata_dataframe,
                          parse_xrdml, parse_ras, parse_rasx, parse_raw,
                          parse_xy, check_regular_grid, resample_to_regular_grid,
                          detect_x_axis)

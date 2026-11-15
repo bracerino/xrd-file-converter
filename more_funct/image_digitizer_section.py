@@ -25,8 +25,8 @@ from scipy.ndimage import (binary_closing, binary_dilation, binary_erosion,
                            find_objects, label, uniform_filter)
 from scipy.signal import find_peaks, savgol_filter
 
-from download_log import log_download
-from ui_style import apply_button_style
+from more_funct.download_log import log_download
+from more_funct.ui_style import apply_button_style
 
 
 # Long side the uploaded image is scaled down to before anything is measured.

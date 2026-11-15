@@ -10,8 +10,8 @@ from scipy.signal import savgol_filter as _savgol
 from scipy.sparse import diags as _sp_diags
 from scipy.sparse.linalg import spsolve as _spsolve
 
-from xrd_conversion import timestamp_suffix
-from xrd_parsers import metadata_dataframe
+from more_funct.xrd_conversion import timestamp_suffix
+from more_funct.xrd_parsers import metadata_dataframe
 
 
 FONT_SIZE  = 18

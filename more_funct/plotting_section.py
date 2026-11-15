@@ -16,10 +16,10 @@ import pandas as pd
 import plotly.graph_objs as go
 import streamlit as st
 
-from download_log import log_download
-from ui_style import apply_button_style
-from xrd_conversion import timestamp_suffix
-from xrd_parsers import parse_xrdml, parse_ras, parse_rasx, parse_raw
+from more_funct.download_log import log_download
+from more_funct.ui_style import apply_button_style
+from more_funct.xrd_conversion import timestamp_suffix
+from more_funct.xrd_parsers import parse_xrdml, parse_ras, parse_rasx, parse_raw
 
 # Colour-blind friendly qualitative palette, reused cyclically.
 PALETTE = [

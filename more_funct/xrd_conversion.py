@@ -1,7 +1,7 @@
 # xrd_axis_converter.py
 
 import streamlit as st
-from ui_style import apply_button_style
+from more_funct.ui_style import apply_button_style
 import pandas as pd
 import numpy as np
 import plotly.graph_objs as go
@@ -9,8 +9,8 @@ from io import StringIO, BytesIO
 from datetime import datetime
 import zipfile
 
-from download_log import log_download
-from xrd_parsers import parse_xrdml, parse_ras, parse_rasx, parse_raw, parse_xy
+from more_funct.download_log import log_download
+from more_funct.xrd_parsers import parse_xrdml, parse_ras, parse_rasx, parse_raw, parse_xy
 
 
 def timestamp_suffix():

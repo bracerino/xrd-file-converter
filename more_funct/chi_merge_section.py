@@ -21,7 +21,7 @@ from scipy.ndimage import (
     uniform_filter1d,
 )
 
-from download_log import log_download
+from more_funct.download_log import log_download
 
 
 FONT_SIZE   = 24

@@ -1,15 +1,15 @@
 # data_reduction_section.py
 
 import streamlit as st
-from ui_style import apply_button_style
+from more_funct.ui_style import apply_button_style
 import pandas as pd
 import numpy as np
 import plotly.graph_objs as go
 from io import StringIO, BytesIO
 import zipfile
 
-from download_log import log_download
-from xrd_conversion import AXIS_UPLOAD_EXTENSIONS, load_xy_file, timestamp_suffix
+from more_funct.download_log import log_download
+from more_funct.xrd_conversion import AXIS_UPLOAD_EXTENSIONS, load_xy_file, timestamp_suffix
 
 
 REDUCE_METHODS = [
