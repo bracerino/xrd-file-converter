@@ -1613,7 +1613,8 @@ def _logo_data_uri(relative_path):
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), relative_path)
     try:
         with open(path, 'rb') as fh:
-            mime = "image/svg+xml" if path.endswith(".svg") else "image/png"
+            mime = ("image/svg+xml" if path.endswith(".svg")
+                    else "image/webp" if path.endswith(".webp") else "image/png")
             return f"data:{mime};base64," + base64.b64encode(fh.read()).decode('ascii')
     except OSError:
         return None
@@ -1682,6 +1683,34 @@ SUPPORTERS = [
 ]
 
 
+# The XRDlicious article in J. Appl. Cryst.; shown below the supporter logos
+# as the IUCr mark plus the journal name, linking to the article.
+ARTICLE_URL = "https://doi.org/10.1107/S1600576725005370"
+ARTICLE_TITLE = ("Lebeda et al. (2025). XRDlicious: an interactive web-based platform "
+                 "for online calculation of diffraction patterns and radial distribution "
+                 "functions from crystal structures. J. Appl. Cryst. 58")
+
+
+def _journal_html():
+    mark = _logo_data_uri("images/iucr_journals_logo_spaces.webp")
+    mark_html = (f'<img src="{mark}" alt="IUCr" style="height:30px;width:30px;flex:none;">'
+                 if mark else "")
+    # without the mark, a coloured bar on the left takes its place
+    bar = "" if mark else "border-left:4px solid #1f4e8c;padding-left:8px;"
+    badge = (
+        '<span style="display:inline-flex;align-items:center;gap:8px;">'
+        + mark_html +
+        f'<span style="display:inline-block;{bar}padding-top:2px;padding-bottom:2px;'
+        'line-height:1.05;font-family:Georgia,\'Times New Roman\',serif;color:#1f4e8c;">'
+        '<span style="font-size:0.78em;font-style:italic;">Journal of</span><br>'
+        '<span style="font-size:0.95em;font-weight:700;white-space:nowrap;">'
+        'Applied Crystallography</span></span></span>')
+    return (
+        '<div style="font-size:0.85em;opacity:0.8;margin:14px 0 6px 0;">Published in</div>'
+        f'<a href="{ARTICLE_URL}" target="_blank" title="{ARTICLE_TITLE}" '
+        'style="text-decoration:none;">' + badge + '</a>')
+
+
 def display_supporters():
     """Supporter logos at the bottom of the sidebar, same block as in XRDlicious."""
     logos = []
@@ -1697,7 +1726,7 @@ def display_supporters():
         '<div style="font-size:0.85em;opacity:0.8;margin:6px 0;">'
         '<b>FZU</b> and the <b>IMPLANT group</b></div>'
         '<div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">'
-        + "".join(logos) + '</div>',
+        + "".join(logos) + '</div>' + _journal_html(),
         unsafe_allow_html=True,
     )
 
